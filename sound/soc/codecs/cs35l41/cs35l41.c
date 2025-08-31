@@ -269,7 +269,7 @@ static int cs35l41_dsp_load_ev(struct snd_soc_dapm_widget *w,
 	enum cs35l41_cspl_mboxstate fw_status = CSPL_MBOX_STS_RUNNING;
 	int ret = 0;
 
-	dev_dbg(cs35l41->dev, "%s: event = 0x%x\n", __func__, event);
+	dev_info(cs35l41->dev, "%s: event = 0x%x\n", __func__, event);
 	
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
@@ -582,11 +582,11 @@ static int cs35l41_hibernate_force_wake_put(struct snd_kcontrol *kcontrol,
 }
 
 static const char *cs35l41_fast_switch_text[] = {
-	"fast_switch1.txt",
-	"fast_switch2.txt",
-	"fast_switch3.txt",
-	"fast_switch4.txt",
-	"fast_switch5.txt",
+        "cs35l41-delta-spk-music.txt",
+        "cs35l41-delta-spk-handsfree.txt",
+        "cs35l41-delta-rcv-music.txt",
+        "cs35l41-delta-rcv-handset.txt",
+        "cs35l41-delta-rcv-handsfree.txt",
 };
 
 static int cs35l41_fast_switch_en_get(struct snd_kcontrol *kcontrol,
@@ -1608,7 +1608,7 @@ static const struct snd_kcontrol_new cs35l41_aud_controls[] = {
 		       cs35l41_ambient_get, cs35l41_ambient_put),
 	SOC_SINGLE_EXT("AMP Active Status", SND_SOC_NOPM, 0, 1, 0,
             cs35l41_amp_active_status_get, cs35l41_amp_active_status_put),
-	SOC_SINGLE_EXT("Spksw Gpio Swtich", SND_SOC_NOPM, 0, 0x1, 0,
+	SOC_SINGLE_EXT("Spksw Gpio Switch", SND_SOC_NOPM, 0, 0x1, 0,
 		       cs35l41_spksw_gpio_get, cs35l41_spksw_gpio_put),
 	SND_SOC_BYTES_TLV("AMP WR Registers", REG_VALUE_SIZE,
 			cs35l41_rw_registers_get, cs35l41_rw_registers_put),
@@ -2017,7 +2017,7 @@ static int cs35l41_main_amp_event(struct snd_soc_dapm_widget *w,
 	bool pdn;
 	unsigned int val;
 
-	dev_dbg(cs35l41->dev, "%s: event = 0x%x\n", __func__, event);
+	dev_info(cs35l41->dev, "%s: event = 0x%x\n", __func__, event);
 
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
@@ -2381,6 +2381,7 @@ static int cs35l41_pcm_hw_params(struct snd_pcm_substream *substream,
 	int i;
 	unsigned int rate = params_rate(params);
 	u8 asp_width, asp_wl;
+        unsigned int gen = 0;
 
 	for (i = 0; i < ARRAY_SIZE(cs35l41_fs_rates); i++) {
 		if (rate == cs35l41_fs_rates[i].rate)
@@ -2391,6 +2392,12 @@ static int cs35l41_pcm_hw_params(struct snd_pcm_substream *substream,
 		dev_err(cs35l41->dev, "%s: Unsupported rate: %u\n",
 						__func__, rate);
 		return -EINVAL;
+	}
+
+        regmap_read(cs35l41->regmap, CS35L41_PWR_CTRL1, &gen);
+        if (gen & (1 << CS35L41_GLOBAL_EN_SHIFT)) {
+	    dev_info(cs35l41->dev, "%s: AMP is already on, skil params: %u\n",__func__);
+	    return 0;
 	}
 
 	asp_wl = params_width(params);
@@ -4012,6 +4019,9 @@ int cs35l41_probe(struct cs35l41_private *cs35l41,
 #elif defined(CONFIG_TARGET_PRODUCT_INGRES) // L10
 	ret = regmap_write(cs35l41->regmap, CS35L41_PWR_CTRL3, 0x01001010);
 	ret = regmap_write(cs35l41->regmap, CS35L41_VPBR_CFG, 0x02AA130A);
+#elif defined(CONFIG_TARGET_PRODUCT_DAUMIER) // L2M
+	ret = regmap_write(cs35l41->regmap, CS35L41_PWR_CTRL3, 0x01001010);
+	ret = regmap_write(cs35l41->regmap, CS35L41_VPBR_CFG, 0x02AA190D);
 #else
 	ret = regmap_write(cs35l41->regmap, CS35L41_VPBR_CFG, 0x02005306);
 #endif

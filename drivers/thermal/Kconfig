@@ -382,13 +382,6 @@ config DB8500_THERMAL
 	  created. Cooling devices can be bound to the trip points to cool this
 	  thermal zone if trip points reached.
 
-config MI_THERMAL_INTERFACE
-	tristate "xiaomi thermal control interface"
-	depends on THERMAL
-	default n
-	help
-	  This is xiaomi thermal control interface.
-
 config ARMADA_THERMAL
 	tristate "Marvell EBU Armada SoCs thermal management"
 	depends on ARCH_MVEBU || COMPILE_TEST
@@ -516,11 +509,17 @@ config MI_THERMAL_MULTI_CHARGE
 	help
 	  Enable multi charge function in kernel, add two sysfs nodes in
 	  thermal_message.
-          
+
 config MI_THERMAL_ATC_ENABLE
 	tristate "enable atc enable themral interface"
 	help
 	  Enable atc enable function in kernel, add two sysfs nodes in
 	  thermal_message.
-          
+
+config MI_THERMAL_TZMODE
+	tristate "enable game mode for beanpod tee"
+	help
+	  Enable game mode in kernel when the device uses beanpod tee
+	  instead of mitee.
+
 endif

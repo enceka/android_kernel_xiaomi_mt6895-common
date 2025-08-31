@@ -334,7 +334,19 @@ static int mt6895_usb_echo_ref_set(struct snd_kcontrol *kcontrol,
 	if (!dl_memif->substream) {
 		dev_warn(afe->dev, "%s(), dl_memif->substream == NULL\n",
 			 __func__);
-		return -EINVAL;
+		if (afe_priv->usb_call_echo_ref_reallocate) {
+			dev_warn(afe->dev, "%s(), area: %p\n", __func__,
+				 dl_memif->dma_area);
+			/* free previous allocate */
+			dma_free_coherent(afe->dev,
+					  dl_memif->dma_bytes,
+					  dl_memif->dma_area,
+					  dl_memif->dma_addr);
+
+			afe_priv->usb_call_echo_ref_reallocate = false;
+			afe_priv->usb_call_echo_ref_enable = false;
+		}
+		return 0;
 	}
 
 	if (!ul_memif->substream) {

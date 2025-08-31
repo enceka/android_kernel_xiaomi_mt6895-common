@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (c) 2019 MediaTek Inc.
-// Copyright (C) 2022 XiaoMi, Inc.
+
 /*****************************************************************************
  *
  * Filename:
@@ -68,12 +68,12 @@
 #define COARSE_INTEGRATION_TIME_SHIFT_ADDR 0x0704
 #define AGAIN_ADDR      0x0204
 #define DGAIN_ADDR      0x020E
-#define GROUP_HOLD_ADDR 0x0104
+//#define GROUP_HOLD_ADDR 0x0104
 #define AWB_R_GAIN_ADDR 0x0D82
 #define AWB_G_GAIN_ADDR 0x0D84
 #define AWB_B_GAIN_ADDR 0x0D86
 
-static int set_gain_num;
+static int set_gain_num = 0 ;
 
 static struct imgsensor_info_struct imgsensor_info = {
 	.sensor_id = RUBENSS5K4H7_SENSOR_ID,
@@ -218,12 +218,10 @@ static void set_dummy(struct subdrv_ctx *ctx)
 {
 	S5K4H7_LOG_DBG("dummyline = %d, dummypixels = %d \n", ctx->dummy_line, ctx->dummy_pixel);
 
-	write_cmos_sensor(ctx, GROUP_HOLD_ADDR, 0x0100);
 	write_cmos_sensor_8(ctx, 0x0340, ctx->frame_length >> 8);
 	write_cmos_sensor_8(ctx, 0x0341, ctx->frame_length & 0xFF);
 	write_cmos_sensor_8(ctx, 0x0342, ctx->line_length >> 8);
 	write_cmos_sensor_8(ctx, 0x0343, ctx->line_length & 0xFF);
-	write_cmos_sensor(ctx, GROUP_HOLD_ADDR, 0x0000);
 }	/*	set_dummy  */
 
 
@@ -287,19 +285,15 @@ static void write_shutter(struct subdrv_ctx *ctx, kal_uint32 shutter)
 				set_max_framerate(ctx, 146, 0);
 				//set_dummy();
 		} else {
-				write_cmos_sensor(ctx, GROUP_HOLD_ADDR, 0x0100);
-				write_cmos_sensor_8(ctx, 0x0340, ctx->frame_length >> 8);
-				write_cmos_sensor_8(ctx, 0x0341, ctx->frame_length & 0xFF);
-				write_cmos_sensor(ctx, GROUP_HOLD_ADDR, 0x0100);
+				write_cmos_sensor_8(ctx,0x0340, ctx->frame_length >> 8);
+				write_cmos_sensor_8(ctx,0x0341, ctx->frame_length & 0xFF);
 		}
 	}
 	// Update Shutter
-	write_cmos_sensor(ctx, GROUP_HOLD_ADDR, 0x0100);
 	write_cmos_sensor_8(ctx, 0x0340, ctx->frame_length >> 8);
 	write_cmos_sensor_8(ctx, 0x0341, ctx->frame_length & 0xFF);
 	write_cmos_sensor_8(ctx, 0x0202, (shutter >> 8) & 0xFF);
 	write_cmos_sensor_8(ctx, 0x0203, shutter & 0xFF);
-	write_cmos_sensor(ctx, GROUP_HOLD_ADDR, 0x0000);
 	S5K4H7_LOG_DBG("realtime_fps =%d\n", realtime_fps);
 	S5K4H7_LOG_DBG("shutter =%d, framelength =%d\n",
 			shutter, ctx->frame_length);
@@ -341,9 +335,7 @@ static void set_frame_length(struct subdrv_ctx *ctx, kal_uint16 frame_length)
 		ctx->frame_length = ctx->min_frame_length;
 
 	/* Extend frame length */
-	write_cmos_sensor(ctx, GROUP_HOLD_ADDR, 0x0100);
 	write_cmos_sensor(ctx, FRAME_LENGTH_LINES_ADDR, ctx->frame_length & 0xFFFF);
-	write_cmos_sensor(ctx, GROUP_HOLD_ADDR, 0x0000);
 
 	S5K4H7_LOG_INF("Framelength: set=%d/input=%d/min=%d, auto_extend=%d\n",
 		ctx->frame_length, frame_length, ctx->min_frame_length,
@@ -396,25 +388,22 @@ static void set_shutter_frame_length(struct subdrv_ctx *ctx, kal_uint16 shutter,
 			set_max_framerate(ctx, 146, 0);
 		else {
 			/* Extend frame length */
-			write_cmos_sensor(ctx, GROUP_HOLD_ADDR, 0x0100);
 			write_cmos_sensor(ctx, FRAME_LENGTH_LINES_ADDR, ctx->frame_length & 0xFFFF);
-			write_cmos_sensor(ctx, GROUP_HOLD_ADDR, 0x0000);
 		}
 	}
 
 	if (shutter & 0xFFFF0000) {
 		Rshift = 6;
-	} else {
+	}
+	else {
 		Rshift = 0;
 	}
 
 	// Update Shutter
-	write_cmos_sensor(ctx, GROUP_HOLD_ADDR, 0x0100);
 	write_cmos_sensor_8(ctx, 0x0340, ctx->frame_length >> 8);
 	write_cmos_sensor_8(ctx, 0x0341, ctx->frame_length & 0xFF);
 	write_cmos_sensor_8(ctx, 0x0202, (shutter >> 8) & 0xFF);
 	write_cmos_sensor_8(ctx, 0x0203, shutter & 0xFF);
-	write_cmos_sensor(ctx, GROUP_HOLD_ADDR, 0x0000);
 	S5K4H7_LOG_DBG("set shutter =%d, framelength =%d\n", shutter, ctx->frame_length);
 
 }	/* set_shutter_frame_length */
@@ -437,10 +426,8 @@ static void set_multi_shutter_frame_length(struct subdrv_ctx *ctx,
 		if (shutters[0] < imgsensor_info.min_shutter)
 			shutters[0] = imgsensor_info.min_shutter;
 
-		write_cmos_sensor(ctx, GROUP_HOLD_ADDR, 0x0100);
 		write_cmos_sensor(ctx, FRAME_LENGTH_LINES_ADDR, ctx->frame_length);
 		write_cmos_sensor(ctx, COARSE_INTEGRATION_TIME_ADDR, shutters[0]);
-		write_cmos_sensor(ctx, GROUP_HOLD_ADDR, 0x0000);
 
 		S5K4H7_LOG_DBG("shutter =%d, framelength =%d\n",	shutters[0], ctx->frame_length);
 	}
@@ -488,24 +475,24 @@ static kal_uint16 set_gain(struct subdrv_ctx *ctx, kal_uint16 gain)
 			gain = max_gain;
 	}
 
-	if (ctx->sensor_mode == IMGSENSOR_MODE_CUSTOM1) {
-		if (set_gain_num == 0) {
-			set_gain_num++;
+	if(ctx->sensor_mode == IMGSENSOR_MODE_CUSTOM1){
+		if(set_gain_num ==0){
+			set_gain_num ++;
 			reg_gain = gain2reg(ctx, gain);
 			ctx->gain = reg_gain;
-		} else {
+		}else{
 			reg_gain = ctx->gain;//gain n+1 take effect
 			ctx->gain = gain2reg(ctx, gain);
 		}
-	} else {
+	}else{
 		reg_gain = gain2reg(ctx, gain);
 		ctx->gain = reg_gain;
 	}
 
-	S5K4H7_LOG_DBG("ctx->sensor_mode: %d", ctx->sensor_mode);
+	S5K4H7_LOG_DBG("ctx->sensor_mode: %d",ctx->sensor_mode);
 	S5K4H7_LOG_DBG("gain = %d, ctx->gain = 0x%x ,reg_gain = 0x%x, max_gain:0x%x\n ",
 		gain, ctx->gain, reg_gain, max_gain);
-	if (reg_gain) {
+	if(reg_gain){
 		//write_cmos_sensor(0x0204,reg_gain);
 		write_cmos_sensor_8(ctx, 0x0204, (reg_gain >> 8));
 		write_cmos_sensor_8(ctx, 0x0205, (reg_gain & 0xff));
@@ -554,7 +541,7 @@ static kal_uint32 streaming_control(struct subdrv_ctx *ctx, kal_bool enable)
 			mDELAY(5);
 	} else {
 			//write_cmos_sensor(0x6028,0x4000);
-			write_cmos_sensor_8(ctx, 0x0100, 0x00);
+			write_cmos_sensor_8(ctx, 0x0100, 0x00);	
 
 	}
 	return ERROR_NONE;
@@ -564,7 +551,7 @@ static kal_uint32 streaming_control(struct subdrv_ctx *ctx, kal_bool enable)
 static void sensor_init(struct subdrv_ctx *ctx)
 {
 	S5K4H7_LOG_INF("+\n");
-
+	
 	rubenss5k4h7_table_write_cmos_sensor(ctx, rubenss5k4h7_init_setting,
 		sizeof(rubenss5k4h7_init_setting) / sizeof(kal_uint16));
 
@@ -574,10 +561,10 @@ static void sensor_init(struct subdrv_ctx *ctx)
 static void preview_setting(struct subdrv_ctx *ctx)
 {
 	S5K4H7_LOG_INF("+\n");
-
+	
 	rubenss5k4h7_table_write_cmos_sensor(ctx, rubenss5k4h7_preview_setting,
 			sizeof(rubenss5k4h7_preview_setting) / sizeof(kal_uint16));
-
+	
 	S5K4H7_LOG_INF("-\n");
 } /* preview_setting */
 
@@ -1362,7 +1349,7 @@ static int feature_control(
 				imgsensor_info.sensor_output_dataformat;
 			break;
 		}
-		S5K4H7_LOG_INF("SENSOR_FEATURE_GET_OUTPUT_FORMAT_BY_SCENARIO get:%d\n", *(feature_data + 1));
+		S5K4H7_LOG_INF("SENSOR_FEATURE_GET_OUTPUT_FORMAT_BY_SCENARIO get:%d\n",*(feature_data + 1));
 	break;
 	case SENSOR_FEATURE_GET_AWB_REQ_BY_SCENARIO:
 		switch (*feature_data) {

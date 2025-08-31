@@ -45,6 +45,9 @@ ssize_t mi_dsi_display_get_disp_param(void *display,
 ssize_t mi_dsi_display_read_wp_info(void *display,
 			char *buf, size_t size);
 
+ssize_t mi_dsi_display_read_grayscale_info(void *display,
+			char *buf, size_t size);
+
 int mi_dsi_display_set_doze_brightness(void *display, int doze_brightness);
 
 int mi_dsi_display_get_doze_brightness(void *display,
@@ -79,6 +82,9 @@ int mi_dsi_display_get_brightness(void *display,
 void mi_dsi_display_wakeup_pending_doze_work(void *display);
 
 int mi_dsi_display_get_max_brightness_clone(void *display,
+			u32 *max_brightness_clone);
+
+int mi_dsi_display_get_factory_max_brightness(void *display,
 			u32 *max_brightness_clone);
 
 int mi_dsi_display_set_thermal_limit_brightness_clone(void *display,

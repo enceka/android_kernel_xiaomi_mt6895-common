@@ -1,5 +1,7 @@
 obj-$(CONFIG_MTK_VIDEO_LM3644)     += lm3644.o
 obj-$(CONFIG_MTK_VIDEO_KTD2687)     += ktd2687.o
+obj-$(CONFIG_MTK_VIDEO_KTD2687_LEFT)     += ktd2687_left.o
+obj-$(CONFIG_MTK_VIDEO_KTD2687_RIGHT)     += ktd2687_right.o
 MTK_CUSTOM_PATH := $(srctree)/drivers/misc/mediatek
 subdir-ccflags-y += \
 	-I$(MTK_CUSTOM_PATH)/flashlight

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2019 MediaTek Inc.
- * Copyright (C) 2022 XiaoMi, Inc.
  */
 
 #define pr_fmt(fmt)    "mtk_iommu: debug " fmt
@@ -4440,10 +4439,10 @@ static int mtk_m4u_dbg_probe(struct platform_device *pdev)
 
 	ret = register_trace_android_vh_iommu_iovad_alloc_iova(alloc_iova_hook,
 							       "mtk_m4u_dbg_probe");
-	pr_debug("add alloc iova hook %s\n", ret ? "fail" : "pass");
+	pr_debug("add alloc iova hook %s\n", ret ? "fail": "pass");
 	ret = register_trace_android_vh_iommu_iovad_free_iova(free_iova_hook,
 							      "mtk_m4u_dbg_probe");
-	pr_debug("add free iova hook %s\n", ret ? "fail" : "pass");
+	pr_debug("add free iova hook %s\n", ret ? "fail": "pass");
 
 	pr_info("%s done\n", __func__);
 	return 0;

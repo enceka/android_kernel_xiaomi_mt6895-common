@@ -4,7 +4,6 @@
  * Author: Laurent Pinchart <laurent.pinchart@ideasonboard.com>
  *
  * Copyright (C) 2014-2020 Renesas Electronics Corporation
- * Copyright (C) 2022 XiaoMi, Inc.
  */
 
 #include <linux/bitmap.h>
@@ -1013,7 +1012,9 @@ static int ipmmu_probe(struct platform_device *pdev)
 	bitmap_zero(mmu->ctx, IPMMU_CTX_MAX);
 	mmu->features = of_device_get_match_data(&pdev->dev);
 	memset(mmu->utlb_ctx, IPMMU_CTX_INVALID, mmu->features->num_utlbs);
-	dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(40));
+	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(40));
+	if (ret)
+		return ret;
 
 	/* Map I/O memory and request IRQ. */
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
@@ -1157,7 +1158,7 @@ static int ipmmu_resume_noirq(struct device *dev)
 static const struct dev_pm_ops ipmmu_pm  = {
 	SET_NOIRQ_SYSTEM_SLEEP_PM_OPS(NULL, ipmmu_resume_noirq)
 };
-#define (DEV_PM_OPS)	(&ipmmu_pm)
+#define DEV_PM_OPS	&ipmmu_pm
 #else
 #define DEV_PM_OPS	NULL
 #endif /* CONFIG_PM_SLEEP */

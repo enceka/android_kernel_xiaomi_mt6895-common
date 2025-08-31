@@ -245,14 +245,11 @@ static int set_sensor_mode(struct adaptor_ctx *ctx,
 		struct sensor_mode *mode, char update_ctrl_defs)
 {
 	s64 min, max, def;
-#ifdef __XIAOMI_CAMERA__
 	u32 update_seamless = 0;
 	union feature_para para;
 	u32 len;
-#endif
 
 	if (ctx->cur_mode == mode) {
-#ifdef __XIAOMI_CAMERA__
 		para.u32[0] = 0;
 		subdrv_call(ctx, feature_control,
 			XIAOMI_FEATURE_GET_NEED_UPDATE_SEAMLESS_SETTING,
@@ -260,7 +257,6 @@ static int set_sensor_mode(struct adaptor_ctx *ctx,
 		update_seamless = para.u32[0];
 		if (update_seamless)
 			ctx->is_sensor_scenario_inited = 0;
-#endif
 		if (update_ctrl_defs)
 			control_sensor(ctx);
 		return 0;

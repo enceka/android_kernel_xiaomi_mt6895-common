@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (c) 2019 MediaTek Inc.
-// Copyright (C) 2022 XiaoMi, Inc.
 
 #include <linux/module.h>
 #include <linux/delay.h>
@@ -35,7 +34,12 @@
 #include "imgsensor-user.h"
 #include "mtk_cam-seninf-ca.h"
 
+#if defined(YUECHU_CAM) || defined(ARISTOTLE_CAM)
+#define ESD_RESET_SUPPORT 0
+#else
 #define ESD_RESET_SUPPORT 1
+#endif
+
 #define V4L2_CID_MTK_SENINF_BASE	(V4L2_CID_USER_BASE | 0xf000)
 #define V4L2_CID_MTK_TEST_STREAMON	(V4L2_CID_MTK_SENINF_BASE + 1)
 
@@ -1209,6 +1213,66 @@ static int debug_err_detect_initialize(struct seninf_ctx *ctx)
 	return 0;
 }
 
+static int mtk_senif_get_ccu_phandle(struct seninf_core *core)
+{
+	struct device *dev = core->dev;
+	struct device_node *node;
+	int ret = 0;
+
+	node = of_find_compatible_node(NULL, NULL, "mediatek,camera_fsync_ccu");
+	if (node == NULL) {
+		dev_info(dev, "of_find mediatek,camera_fsync_ccu fail\n");
+		ret = PTR_ERR(node);
+		goto out;
+	}
+
+	ret = of_property_read_u32(node, "mediatek,ccu_rproc",
+				   &core->rproc_ccu_phandle);
+	if (ret) {
+		dev_info(dev, "fail to get rproc_ccu_phandle:%d\n", ret);
+		ret = -EINVAL;
+		goto out;
+	}
+
+out:
+	return ret;
+}
+
+static int mtk_senif_power_ctrl_ccu(struct seninf_core *core, int on_off)
+{
+	int ret;
+
+	if (on_off) {
+		ret = mtk_senif_get_ccu_phandle(core);
+		if (ret)
+			goto out;
+		core->rproc_ccu_handle = rproc_get_by_phandle(core->rproc_ccu_phandle);
+		if (core->rproc_ccu_handle == NULL) {
+			dev_info(core->dev, "Get ccu handle fail\n");
+			ret = PTR_ERR(core->rproc_ccu_handle);
+			goto out;
+		}
+
+		ret = rproc_boot(core->rproc_ccu_handle);
+		if (ret)
+			dev_info(core->dev, "boot ccu rproc fail\n");
+
+		if (core->dfs.reg)
+			regulator_enable(core->dfs.reg);
+	} else {
+		if (core->dfs.reg && regulator_is_enabled(core->dfs.reg))
+			regulator_disable(core->dfs.reg);
+
+		if (core->rproc_ccu_handle) {
+			rproc_shutdown(core->rproc_ccu_handle);
+			ret = 0;
+		} else
+			ret = -EINVAL;
+	}
+out:
+	return ret;
+}
+
 static int seninf_s_stream(struct v4l2_subdev *sd, int enable)
 {
 #ifdef SENSOR_SECURE_MTEE_SUPPORT
@@ -1219,8 +1283,8 @@ static int seninf_s_stream(struct v4l2_subdev *sd, int enable)
 	struct seninf_core *core;
 
 	core = dev_get_drvdata(ctx->dev->parent);
-	dev_info(ctx->dev, "%s\n", __func__);
-	if (ctx->streaming == enable) {
+	dev_info(ctx->dev, "%s\n",__func__);
+	if (ctx->streaming == enable){
 		/* for continuous detection */
 		if (core->err_detect_init_flag)
 			g_seninf_ops->_enable_stream_err_detect(ctx);
@@ -1248,10 +1312,12 @@ static int seninf_s_stream(struct v4l2_subdev *sd, int enable)
 					ctx->sensor_pad_idx, &ctx->buffered_pixel_rate);
 
 		get_customized_pixel_rate(ctx, ctx->sensor_sd, &ctx->customized_pixel_rate);
+		mtk_senif_power_ctrl_ccu(core, 1);
 		ret = pm_runtime_get_sync(ctx->dev);
 		if (ret < 0) {
 			dev_info(ctx->dev, "%s pm_runtime_get_sync ret %d\n", __func__, ret);
 			pm_runtime_put_noidle(ctx->dev);
+			mtk_senif_power_ctrl_ccu(core, 0);
 			return ret;
 		}
 
@@ -1299,6 +1365,7 @@ static int seninf_s_stream(struct v4l2_subdev *sd, int enable)
 		g_seninf_ops->_poweroff(ctx);
 		ctx->dbg_last_dump_req = 0;
 		pm_runtime_put_sync(ctx->dev);
+		mtk_senif_power_ctrl_ccu(core, 0);
 	}
 
 	ctx->streaming = enable;
@@ -1493,7 +1560,7 @@ static int seninf_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 
 	mutex_lock(&ctx->mutex);
 	ctx->open_refcnt++;
-	ctx->pid = find_get_pid(current->pid);
+	ctx->pid = find_get_pid(current->tgid);
 
 	if (ctx->open_refcnt == 1)
 		dev_info(ctx->dev, "%s open_refcnt %d\n", __func__, ctx->open_refcnt);
@@ -1819,9 +1886,6 @@ static int runtime_suspend(struct device *dev)
 				clk_disable_unprepare(ctx->core->clk[i]);
 		} while (i);
 		seninf_core_pm_runtime_put(core);
-		if (ctx->core->dfs.reg && regulator_is_enabled(ctx->core->dfs.reg))
-			regulator_disable(ctx->core->dfs.reg);
-
 	}
 
 	mutex_unlock(&core->mutex);
@@ -1840,8 +1904,6 @@ static int runtime_resume(struct device *dev)
 	core->refcnt++;
 
 	if (core->refcnt == 1) {
-		if (ctx->core->dfs.reg)
-			regulator_enable(ctx->core->dfs.reg);
 		seninf_core_pm_runtime_get_sync(core);
 		for (i = 0; i < CLK_TOP_SENINF_END; i++) {
 			if (core->clk[i])
@@ -1955,7 +2017,11 @@ int mtk_cam_seninf_get_pixelrate(struct v4l2_subdev *sd, s64 *p_pixel_rate)
 	return 0;
 }
 
+#ifdef DAUMIER_CAM
+#define SOF_TIMEOUT_RATIO 200
+#else
 #define SOF_TIMEOUT_RATIO 110
+#endif
 int mtk_cam_seninf_check_timeout(struct v4l2_subdev *sd, u64 time_after_sof)
 {
 	struct seninf_ctx *ctx = sd_to_ctx(sd);

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2019 MediaTek Inc.
- * Copyright (C) 2022 XiaoMi, Inc.
  */
 
 #define PFX "CAM_CAL"
@@ -17,17 +16,17 @@
 #define pr_debug_err(...)    pr_debug("error: " __VA_ARGS__)
 
 static struct STRUCT_CALIBRATION_LAYOUT_STRUCT cal_layout_table = {
-	0x00000008, 0xFFFFFFBA, CAM_CAL_SINGLE_EEPROM_DATA,
-	{
-		{0x00000001, 0x00000001, 0x0000000F, xiaomi_do_module_version},
-		{0x00000001, 0x00000010, 0x00000010, xiaomi_do_part_number},
-		{0x00000001, 0x0000078C, 0x0000074C, xiaomi_do_single_lsc},
-		{0x00000001, 0x00000754, 0x00000010, xiaomi_do_2a_gain},
-		{0x00000000, 0x000016C1, 0x000005DD, NULL},
-		{0x00000000, 0x00000000, 0x00000001, NULL},
-		{0x00000000, 0x00000000, 0x00003FFC, xiaomi_do_dump_all},
-		{0x00000000, 0x00000F80, 0x0000000A, NULL}
-	}
+        0x00000008, 0xFFFFFFBA, CAM_CAL_SINGLE_EEPROM_DATA,
+        {
+            {0x00000001, 0x00000001, 0x0000000F, xiaomi_do_module_version},
+            {0x00000001, 0x00000010, 0x00000010, xiaomi_do_part_number},
+            {0x00000001, 0x0000078C, 0x0000074C, xiaomi_do_single_lsc},
+            {0x00000001, 0x00000754, 0x00000010, xiaomi_do_2a_gain},
+            {0x00000000, 0x000016C1, 0x000005DD, NULL},
+            {0x00000000, 0x00000000, 0x00000001, NULL},
+            {0x00000000, 0x00000000, 0x00003FFC, xiaomi_do_dump_all},
+            {0x00000000, 0x00000F80, 0x0000000A, NULL}
+        }
 };
 
 struct STRUCT_CAM_CAL_CONFIG_STRUCT xagaaacov16a1_mtk_eeprom = {

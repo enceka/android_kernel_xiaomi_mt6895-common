@@ -259,79 +259,47 @@ static void cs35l41_spksw_safety_check(struct cs35l41_private *cs35l41)
 }
 #endif
 
-int wm_halo_apply_calibration(struct snd_soc_dapm_widget *w)
+int wm_halo_apply_calibration(struct wm_adsp *dsp)
 {
-    int ret = 0;
-    int dc_offset_hold_time = -1;
-	struct snd_soc_component *component =
-		snd_soc_dapm_to_component(w->dapm);
-	struct cs35l41_private *cs35l41 =
-		snd_soc_component_get_drvdata(component);
-	struct wm_adsp *dsp = &cs35l41->dsp;
-	__be32 calr = cpu_to_be32(cs35l41->calr);
+	struct cs35l41_private *cs35l41 =container_of(dsp,
+			struct cs35l41_private, dsp);
+	__be32 calr, status, checksum, ambient;
+	int ret = 0;
+
+	calr = cpu_to_be32(cs35l41->calr);
 	/* status, must be 1 */
-	__be32 status = cpu_to_be32(1);
+	status = cpu_to_be32(1);
 	/* checksum = calr + status*/
-	__be32 checksum = cpu_to_be32(1 + cs35l41->calr);
-	__be32 ambient = cpu_to_be32(cs35l41->ambient);
-	__be32 us_bypass = cpu_to_be32(1);
-    __be32 max_lrclk_delay = cpu_to_be32(0x20);
+	checksum = cpu_to_be32(1 + cs35l41->calr);
+	ambient = cpu_to_be32(cs35l41->ambient);
 
 	if (dsp->fw == WM_ADSP_FW_SPK_PROT) {
-		ret = wm_adsp_write_ctl(dsp, "MAX_LRCLK_DELAY", WMFW_ADSP2_XM, 262308,
-                                &max_lrclk_delay, sizeof(max_lrclk_delay));
-		dev_info(dsp->dev, "Setting %s DSP1 Protection 400a4 MAX_LRCLK_DELAY to 0x%x, ret = %d\n",
-				 dsp->component->name_prefix, be32_to_cpu(max_lrclk_delay), ret);
-        // Read back to confirm
-        max_lrclk_delay = 0;
-		wm_adsp_read_ctl(dsp, "MAX_LRCLK_DELAY", WMFW_ADSP2_XM, 262308, 
-                         &max_lrclk_delay, sizeof(max_lrclk_delay));
-        dev_info(dsp->dev, "Read back %s DSP1 Protection 400a4 MAX_LRCLK_DELAY is 0x%x \n",
-                 dsp->component->name_prefix, be32_to_cpu(max_lrclk_delay));
-
-        wm_adsp_read_ctl(dsp, "DC_OFFSET_HOLD_TIME", WMFW_ADSP2_XM, 262308, 
-                         &dc_offset_hold_time, sizeof(dc_offset_hold_time));
-        dev_info(dsp->dev, "Read back %s DSP1 Protection 400a4 DC_OFFSET_HOLD_TIME is 0x%x \n",
-                 dsp->component->name_prefix, be32_to_cpu(dc_offset_hold_time));
-
-		if (dsp->component->name_prefix &&
-				(!strcmp(dsp->component->name_prefix, "TL")
-				|| !strcmp(dsp->component->name_prefix, "T"))) {
-			ret = wm_adsp_write_ctl(dsp, "ENABLE_FULL_US_BYPASS",
-					WMFW_ADSP2_XM, 262308, &us_bypass, sizeof(us_bypass));
-			dev_info(dsp->dev, "Setting %s US_BYPASS to %d, ret = %d \n",
-				dsp->component->name_prefix, be32_to_cpu(us_bypass), ret);
-
-            // Read back to confirm
-			us_bypass = 0;
-			wm_adsp_read_ctl(dsp, "ENABLE_FULL_US_BYPASS", WMFW_ADSP2_XM, 262308, 
-                             &us_bypass, sizeof(us_bypass));
-            dev_info(dsp->dev, "Read back %s DSP1 Protection 400a4 BLE_FULL_US_BYPASS is %d \n",
-                     dsp->component->name_prefix, be32_to_cpu(us_bypass));
+		if (cs35l41->calr <= 0) {
+			dev_err(dsp->dev, "invalid CAL_R (%d)!\n", cs35l41->calr);
+			return -1;
 		}
 
-		dev_info(dsp->dev, "CAL_R <= %d\n", be32_to_cpu(calr));
-        if (cs35l41->calr <= 0) {
-            dev_err(dsp->dev, "Illegal cs35l41->calr value %d !\n", cs35l41->calr);
-            return 0;
-        }
-
 		ret = wm_adsp_write_ctl(dsp, "CAL_R", WMFW_ADSP2_XM, 0xcd, &calr, sizeof(calr));
-		wm_adsp_write_ctl(dsp, "CAL_CHECKSUM", WMFW_ADSP2_XM, 0xcd,
+		wm_adsp_write_ctl(dsp, "CAL_CHECKSUM",  WMFW_ADSP2_XM, 0xcd,
 				&checksum, sizeof(checksum));
-		wm_adsp_write_ctl(dsp, "CAL_STATUS", WMFW_ADSP2_XM, 0xcd,
+		wm_adsp_write_ctl(dsp, "CAL_STATUS",  WMFW_ADSP2_XM, 0xcd,
 				&status, sizeof(status));
+
+		dev_info(dsp->dev, "CAL_R <= %d, CAL_CHECKSUM <= %d, CAL_STATUS <= %d\n",
+				be32_to_cpu(calr), be32_to_cpu(checksum),
+				be32_to_cpu(status));
+		calr = 0; status = 0; checksum = 0;
 
 		ret = wm_adsp_read_ctl(dsp, "CAL_R", WMFW_ADSP2_XM, 0xcd,
 				&calr, sizeof(calr));
-		dev_info(dsp->dev, "CAL_R => %d , ret = %d\n", be32_to_cpu(calr), ret);
 		wm_adsp_read_ctl(dsp, "CAL_CHECKSUM", WMFW_ADSP2_XM, 0xcd,
 				&checksum, sizeof(checksum));
 		wm_adsp_read_ctl(dsp, "CAL_STATUS", WMFW_ADSP2_XM, 0xcd,
 				&status, sizeof(status));
 
-		dev_info(dsp->dev, "CAL_CHECKSUM => %d \n", be32_to_cpu(checksum));
-		dev_info(dsp->dev, "CAL_STATUS => %d \n", be32_to_cpu(status));
+		dev_info(dsp->dev, "CAL_R => %d, CAL_CHECKSUM => %d, CAL_STATUS => %d\n",
+				be32_to_cpu(calr), be32_to_cpu(checksum),
+				be32_to_cpu(status));
 	}
 
 	if (dsp->fw == WM_ADSP_FW_SPK_CALI) {

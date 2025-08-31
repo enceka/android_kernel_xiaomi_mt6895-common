@@ -139,6 +139,38 @@ static ssize_t disp_param_show(struct device *device,
 	}
 }
 
+static ssize_t mipi_rw_store(struct device *device,
+			   struct device_attribute *attr,
+			   const char *buf, size_t count)
+{
+	struct disp_display *dd_ptr = to_disp_display(device);
+	int ret = 0;
+
+	if (dd_ptr->intf_type == MI_INTF_DSI) {
+		ret = mi_dsi_display_write_mipi_reg(dd_ptr->display, (char *)buf);
+	} else {
+		DISP_ERROR("Unsupported display(%s intf)\n",
+			get_disp_intf_type_name(dd_ptr->intf_type));
+		ret = -EINVAL;
+	}
+
+	return ret ? ret : count;
+}
+
+static ssize_t mipi_rw_show(struct device *device,
+			   struct device_attribute *attr,
+			   char *buf)
+{
+	struct disp_display *dd_ptr = to_disp_display(device);
+
+	if (dd_ptr->intf_type == MI_INTF_DSI) {
+		return mi_dsi_display_read_mipi_reg(dd_ptr->display, buf);
+	} else {
+		return snprintf(buf, PAGE_SIZE, "Unsupported display(%s intf)\n",
+			get_disp_intf_type_name(dd_ptr->intf_type));
+	}
+}
+
 static ssize_t gir_store(struct device *device,
 			   struct device_attribute *attr,
 			   const char *buf, size_t count)
@@ -206,6 +238,38 @@ static ssize_t wp_info_show(struct device *device,
 			get_disp_intf_type_name(dd_ptr->intf_type));
 	}
 
+}
+
+static ssize_t gray_scale_info_show(struct device *device,
+			struct device_attribute *attr, char *buf)
+{
+	size_t buf_size = 64;
+	struct disp_display *dd_ptr = to_disp_display(device);
+	if (dd_ptr->intf_type == MI_INTF_DSI) {
+		return mi_dsi_display_read_grayscale_info(dd_ptr->display, buf, buf_size);
+	} else {
+		return snprintf(buf, PAGE_SIZE, "Unsupported display(%s intf)\n",
+			get_disp_intf_type_name(dd_ptr->intf_type));
+	}
+
+}
+
+static ssize_t flatmode_check_show(struct device *device,
+			struct device_attribute *attr, char *buf)
+{
+	struct disp_display *dd_ptr = to_disp_display(device);
+
+	if (dd_ptr->intf_type == MI_INTF_DSI) {
+		int gir_status = mi_dsi_display_get_gir_status(dd_ptr->display);
+		if (gir_status < 0) {
+			return snprintf(buf, PAGE_SIZE, "invalid\n");
+		} else {
+			return snprintf(buf, PAGE_SIZE, "%d\n", gir_status ? 1 : 0);
+		}
+	} else {
+		return snprintf(buf, PAGE_SIZE, "Unsupported display(%s intf)\n",
+			get_disp_intf_type_name(dd_ptr->intf_type));
+	}
 }
 
 static ssize_t dynamic_fps_show(struct device *device,
@@ -291,6 +355,30 @@ static ssize_t brightness_clone_store(struct device *device,
 	ret = mi_dsi_display_set_brightness_clone(dd_ptr->display, brightness);
 
 	return ret ? ret : count;
+}
+
+static ssize_t max_brightness_clone_show(struct device *device,
+  				struct device_attribute *attr, char *buf)
+  {
+	int max_brightness_clone = 4095;
+ 	struct disp_display *dd_ptr = to_disp_display(device);
+
+ 	mi_dsi_display_get_max_brightness_clone(dd_ptr->display, &max_brightness_clone);
+
+  	return snprintf(buf, PAGE_SIZE, "%d\n", max_brightness_clone);
+
+}
+
+static ssize_t factory_max_brightness_show(struct device *device,
+  				struct device_attribute *attr, char *buf)
+  {
+	int factory_max_brightness = 4095;
+ 	struct disp_display *dd_ptr = to_disp_display(device);
+
+	mi_dsi_display_get_factory_max_brightness(dd_ptr->display,&factory_max_brightness);
+
+  	return snprintf(buf, PAGE_SIZE, "%d\n", factory_max_brightness);
+
 }
 
 static ssize_t panel_event_show(struct device *device,
@@ -443,11 +531,16 @@ static ssize_t hw_vsync_info_show(struct device *device,
 
 #endif
 static DEVICE_ATTR_RW(disp_param);
+static DEVICE_ATTR_RW(mipi_rw);
 static DEVICE_ATTR_RO(panel_info);
 static DEVICE_ATTR_RO(wp_info);
+static DEVICE_ATTR_RO(gray_scale_info);
+static DEVICE_ATTR_RO(flatmode_check);
 static DEVICE_ATTR_RO(dynamic_fps);
 static DEVICE_ATTR_RW(doze_brightness);
 static DEVICE_ATTR_RW(brightness_clone);
+static DEVICE_ATTR_RO(max_brightness_clone);
+static DEVICE_ATTR_RO(factory_max_brightness);
 static DEVICE_ATTR_RW(gir);
 static DEVICE_ATTR_RW(dc_status);
 static DEVICE_ATTR_RW(led_i2c_reg);
@@ -461,16 +554,21 @@ static DEVICE_ATTR_RO(hw_vsync_info);
 
 static struct attribute *disp_feature_attrs[] = {
 	&dev_attr_disp_param.attr,
+	&dev_attr_mipi_rw.attr,
 	&dev_attr_panel_info.attr,
 	&dev_attr_wp_info.attr,
+	&dev_attr_gray_scale_info.attr,
 	&dev_attr_dynamic_fps.attr,
 	&dev_attr_doze_brightness.attr,
 	&dev_attr_brightness_clone.attr,
+	&dev_attr_max_brightness_clone.attr,
+	&dev_attr_factory_max_brightness.attr,
 	&dev_attr_gir.attr,
 	&dev_attr_dc_status.attr,
 	&dev_attr_led_i2c_reg.attr,
 	&dev_attr_panel_event.attr,
 	&dev_attr_idle.attr,
+	&dev_attr_flatmode_check.attr,
 #if 0
 	&dev_attr_gamma_test.attr,
 	&dev_attr_hw_vsync_info.attr,

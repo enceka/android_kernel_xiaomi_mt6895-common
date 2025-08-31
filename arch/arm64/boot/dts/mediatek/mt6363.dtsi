@@ -71,7 +71,7 @@
 			};
 			vin3_open {
 				channel = <AUXADC_VIN3>;
-				pures = <ADC_PURES_OPEN>;
+				pures = <ADC_PURES_100K>;
 			};
 			vin4_open {
 				channel = <AUXADC_VIN4>;
@@ -83,7 +83,7 @@
 			};
 			vin6_open {
 				channel = <AUXADC_VIN6>;
-				pures = <ADC_PURES_OPEN>;
+				pures = <ADC_PURES_100K>;
 			};
 			vin7_open {
 				channel = <AUXADC_VIN7>;

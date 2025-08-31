@@ -1,12 +1,5 @@
-/*
- * Copyright (C) 2022 XiaoMi, Inc.
- *
- * SPDX-License-Identifier: GPL-2.0-or-later
- *
- */
-
+// SPDX-License-Identifier: GPL-2.0-or-later
 #include "xiaomi_touch.h"
-
 static struct xiaomi_touch_pdata *touch_pdata;
 static struct xiaomi_touch *xiaomi_touch_device;
 
@@ -106,6 +99,37 @@ static long xiaomi_touch_dev_ioctl(struct file *file, unsigned int cmd,
 		break;
 	}
 
+	if (user_cmd == SET_CUR_VALUE) {
+		touch_data->thp_cmd_buf[0] = user_cmd;
+		touch_data->thp_cmd_buf[1] = buf[0];
+		touch_data->thp_cmd_buf[2] = buf[1];
+		touch_data->thp_cmd_buf[3] = buf[2];
+		touch_data->thp_cmd_size = 4;
+		sysfs_notify(&xiaomi_touch_device->dev->kobj, NULL,
+			     "touch_thp_cmd");
+	} else if (user_cmd == SET_LONG_VALUE) {
+		touch_data->thp_cmd_buf[0] = user_cmd;
+		touch_data->thp_cmd_buf[1] = buf[0];
+		touch_data->thp_cmd_buf[2] = buf[1];
+		touch_data->thp_cmd_buf[3] = buf[2];
+		if ( buf[2] <= MAX_BUF_SIZE) {
+			memcpy(&(touch_data->thp_cmd_buf[4]), &buf[3], sizeof(int) * buf[2]);
+			touch_data->thp_cmd_size = 4 + buf[2];
+			sysfs_notify(&xiaomi_touch_device->dev->kobj, NULL,
+			     "touch_thp_cmd");
+		} else {
+			mutex_unlock(&dev->mutex);
+			return -EINVAL;
+		}
+	} else if (user_cmd == RESET_MODE) {
+		touch_data->thp_cmd_buf[0] = user_cmd;
+		touch_data->thp_cmd_buf[1] = buf[0];
+		touch_data->thp_cmd_buf[2] = buf[1];
+		touch_data->thp_cmd_size = 3;
+		sysfs_notify(&xiaomi_touch_device->dev->kobj, NULL,
+			     "touch_thp_cmd");
+	}
+
 	if (ret >= 0)
 		ret = copy_to_user((int __user *)argp, &buf, sizeof(buf));
 	else
@@ -124,6 +148,7 @@ static int xiaomi_touch_dev_mmap(struct file *file, struct vm_area_struct *vma)
 	unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
 	unsigned long page;
 	unsigned long pos;
+	int count;
 
 	if (!pdata) {
 		pr_err("%s invalid memory\n", __func__);
@@ -133,12 +158,23 @@ static int xiaomi_touch_dev_mmap(struct file *file, struct vm_area_struct *vma)
 	pos = (unsigned long)pdata->phy_base + offset;
 	page = pos >> PAGE_SHIFT;
 
-	if (remap_pfn_range(vma, start, page, size, PAGE_SHARED))
-		return -EAGAIN;
+	/* Careful about overflows.. */
+	size = PAGE_ALIGN(size);
+	count = size >> PAGE_SHIFT;
 
+	if (count > RAW_SIZE / PAGE_SIZE || count < 0) {
+		return -EOVERFLOW;
+	}
+  
+	if (!(pdata->phy_base <= pos && ((pos + size) <= (pdata->phy_base + RAW_SIZE)))) {
+		return -EOVERFLOW;
+	}
+
+	if (remap_pfn_range(vma, start, page, size, vma->vm_page_prot)) {
+		return -EAGAIN;
+	}
 	pr_info("%s remap_pfn_range %u, size:%ld, success\n",
 		__func__, (unsigned int)page, size);
-
 	return 0;
 }
 
@@ -236,7 +272,20 @@ int xiaomitouch_register_modedata(int touchId, struct xiaomi_touch_interface *da
 		touch_data->touch_vendor_read = data->touch_vendor_read;
 	if (data->setModeLongValue)
 		touch_data->setModeLongValue = data->setModeLongValue;
-
+	if (data->get_touch_rx_num)
+		touch_data->get_touch_rx_num = data->get_touch_rx_num;
+	if (data->get_touch_tx_num)
+		touch_data->get_touch_tx_num = data->get_touch_tx_num;
+	if (data->get_touch_x_resolution)
+		touch_data->get_touch_x_resolution = data->get_touch_x_resolution;
+	if (data->get_touch_y_resolution)
+		touch_data->get_touch_y_resolution = data->get_touch_y_resolution;
+	if (data->enable_touch_raw)
+		touch_data->enable_touch_raw = data->enable_touch_raw;
+	if (data->enable_touch_delta)
+		touch_data->enable_touch_delta = data->enable_touch_delta;
+	if (data->enable_clicktouch_raw)
+		touch_data->enable_clicktouch_raw = data->enable_clicktouch_raw;
 
 	mutex_unlock(&xiaomi_touch_dev.mutex);
 
@@ -398,6 +447,586 @@ static ssize_t touch_vendor_show(struct device *dev,
 		return 0;
 }
 
+static ssize_t xiaomi_touch_tx_num_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct xiaomi_touch_pdata *pdata = dev_get_drvdata(dev);
+
+	if (pdata->touch_data[0]->get_touch_tx_num)
+		return snprintf(buf, PAGE_SIZE, "%d\n", pdata->touch_data[0]->get_touch_tx_num());
+	else
+		return 0;
+}
+
+static ssize_t xiaomi_touch_rx_num_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct xiaomi_touch_pdata *pdata = dev_get_drvdata(dev);
+
+	if (pdata->touch_data[0]->get_touch_rx_num)
+		return snprintf(buf, PAGE_SIZE, "%d\n", pdata->touch_data[0]->get_touch_rx_num());
+	else
+		return 0;
+}
+
+static ssize_t xiaomi_touch_x_resolution_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct xiaomi_touch_pdata *pdata = dev_get_drvdata(dev);
+
+	if (pdata->touch_data[0]->get_touch_x_resolution)
+		return snprintf(buf, PAGE_SIZE, "%d\n", pdata->touch_data[0]->get_touch_x_resolution());
+	else
+		return 0;
+}
+
+static ssize_t xiaomi_touch_y_resolution_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct xiaomi_touch_pdata *pdata = dev_get_drvdata(dev);
+
+	if (pdata->touch_data[0]->get_touch_y_resolution)
+		return snprintf(buf, PAGE_SIZE, "%d\n", pdata->touch_data[0]->get_touch_y_resolution());
+	else
+		return 0;
+}
+
+int copy_touch_rawdata(char *raw_base,  int len)
+{
+	struct xiaomi_touch *dev = NULL;
+
+	if (!touch_pdata)
+		return -ENODEV;
+
+	dev = touch_pdata->device;
+	memcpy((unsigned char *)touch_pdata->raw_buf[touch_pdata->raw_tail], (unsigned char *)raw_base,  len);
+	touch_pdata->raw_len = len;
+	spin_lock(&touch_pdata->raw_lock);
+	touch_pdata->raw_tail++;
+	if (touch_pdata->raw_tail == RAW_BUF_NUM)
+		touch_pdata->raw_tail = 0;
+	spin_unlock(&touch_pdata->raw_lock);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(copy_touch_rawdata);
+
+int update_touch_rawdata(void)
+{
+	sysfs_notify(&xiaomi_touch_dev.dev->kobj, NULL,  "update_rawdata");
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(update_touch_rawdata);
+
+static ssize_t enable_touchraw_store(struct device *dev,
+				     struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct xiaomi_touch_interface *touch_data = NULL;
+	unsigned int input;
+
+	if (!touch_pdata)
+		return -ENOMEM;
+
+	touch_data = touch_pdata->touch_data[0];
+
+	if (sscanf(buf, "%d", &input) < 0)
+		return -EINVAL;
+
+	pr_info("%s,%d\n", __func__, input);
+	if (touch_data->enable_touch_raw)
+		touch_data->enable_touch_raw(input);
+
+	touch_data->is_enable_touchraw = input;
+	touch_pdata->raw_tail = 0;
+	touch_pdata->raw_head = 0;
+
+	return count;
+}
+
+static ssize_t enable_touchraw_show(struct device *dev,
+				    struct device_attribute *attr, char *buf)
+{
+	struct xiaomi_touch_interface *touch_data = NULL;
+
+	if (!touch_pdata)
+		return -ENOMEM;
+
+	touch_data = touch_pdata->touch_data[0];
+
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", touch_data->is_enable_touchraw);
+}
+
+static ssize_t enable_touchdelta_store(struct device *dev,
+				       struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct xiaomi_touch_interface *touch_data = NULL;
+	unsigned int input;
+
+	if (!touch_pdata)
+		return -ENOMEM;
+
+	touch_data = touch_pdata->touch_data[0];
+
+	if (sscanf(buf, "%d", &input) < 0)
+		return -EINVAL;
+
+	pr_info("%s,%d\n", __func__, input);
+	if (touch_data->enable_touch_delta)
+		touch_data->enable_touch_delta(!!input);
+
+	touch_data->is_enable_touchdelta = !!input;
+	return count;
+}
+
+static ssize_t enable_touchdelta_show(struct device *dev,
+				      struct device_attribute *attr, char *buf)
+{
+	struct xiaomi_touch_interface *touch_data = NULL;
+
+	if (!touch_pdata)
+		return -ENOMEM;
+
+	touch_data = touch_pdata->touch_data[0];
+
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", touch_data->is_enable_touchdelta);
+}
+
+static ssize_t thp_cmd_status_show(struct device *dev,
+				   struct device_attribute *attr, char *buf)
+{
+	struct xiaomi_touch_interface *touch_data = NULL;
+
+	mutex_lock(&dev->mutex);
+
+	if (!touch_pdata) {
+		mutex_unlock(&dev->mutex);
+		return -ENOMEM;
+	}
+	touch_data = touch_pdata->touch_data[0];
+	memcpy(buf, touch_data->thp_cmd_buf, touch_data->thp_cmd_size * sizeof(int));
+	mutex_unlock(&dev->mutex);
+	return touch_data->thp_cmd_size * sizeof(int);
+}
+
+static ssize_t thp_cmd_status_store(struct device *dev,
+				    struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct xiaomi_touch_interface *touch_data = NULL;
+	unsigned int input[MAX_BUF_SIZE];
+	const char *p = buf;
+	bool new_data = false;
+	int para_cnt = 0;
+	int i = 0;
+
+	if (!touch_pdata)
+		return -ENOMEM;
+
+	touch_data = touch_pdata->touch_data[0];
+
+	memset(input, 0x00, sizeof(int) * MAX_BUF_SIZE);
+
+	for (p = buf; *p != '\0'; p++) {
+		if (*p >= '0' && *p <= '9') {
+			input[i] = input[i] * 10 + (*p - '0');
+			if (!new_data) {
+				new_data = true;
+				para_cnt++;
+			}
+		} else if (*p == ' ' || *p == ',') {
+			if (new_data) {
+				i++;
+				new_data = false;
+			}
+		} else {
+			break;
+		}
+	}
+
+	pr_info("%s size:%d, cmd:%d, %d, %d, %d\n", __func__, para_cnt, input[0], input[1], input[2], input[3]);
+	if (sizeof(int) * para_cnt < MAX_BUF_SIZE) {
+		for (i = 0; i < para_cnt; i++) {
+			touch_data->thp_cmd_buf[i] = input[i];
+		}
+		touch_data->thp_cmd_size = para_cnt;
+		sysfs_notify(&xiaomi_touch_device->dev->kobj, NULL, "touch_thp_cmd");
+	} else {
+		pr_info("%s memory overlow\n", __func__);
+	}
+	return count;
+}
+
+static ssize_t thp_cmd_data_show(struct device *dev,
+				 struct device_attribute *attr, char *buf)
+{
+	struct xiaomi_touch_interface *touch_data = NULL;
+
+	if (!touch_pdata)
+		return -ENOMEM;
+
+	touch_data = touch_pdata->touch_data[0];
+	memcpy(buf, touch_data->thp_cmd_data_buf, touch_data->thp_cmd_data_size);
+
+	return touch_data->thp_cmd_size * sizeof(int);
+}
+
+static ssize_t thp_cmd_data_store(struct device *dev,
+				  struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct xiaomi_touch_interface *touch_data = NULL;
+
+	if (!touch_pdata)
+		return -ENOMEM;
+
+	touch_data = touch_pdata->touch_data[0];
+
+	if (count > MAX_BUF_SIZE) {
+		pr_info("%s memory out of range:%d\n", __func__, (int)count);
+		return count;
+	}
+	pr_info("%s buf:%s, size:%d\n", __func__, buf, (int)count);
+	memcpy(touch_data->thp_cmd_data_buf, buf, count);
+	touch_data->thp_cmd_data_size = count;
+	sysfs_notify(&xiaomi_touch_device->dev->kobj, NULL, "touch_thp_cmd_data");
+
+	return count;
+}
+
+void thp_send_cmd_to_hal(int cmd, int value)
+{
+	struct xiaomi_touch_interface *touch_data = NULL;
+
+	touch_data = touch_pdata->touch_data[0];
+
+	if (!touch_data)
+		return;
+	mutex_lock(&xiaomi_touch_dev.mutex);
+	touch_data->thp_cmd_buf[0] = SET_CUR_VALUE;
+	touch_data->thp_cmd_buf[1] = 0;
+	touch_data->thp_cmd_buf[2] = cmd;
+	touch_data->thp_cmd_buf[3] = value;
+	touch_data->thp_cmd_size = 4;
+	sysfs_notify(&xiaomi_touch_device->dev->kobj, NULL, "touch_thp_cmd");
+	mutex_unlock(&xiaomi_touch_dev.mutex);
+}
+EXPORT_SYMBOL_GPL(thp_send_cmd_to_hal);
+
+static ssize_t thp_downthreshold_show(struct device *dev,
+				      struct device_attribute *attr, char *buf)
+{
+	struct xiaomi_touch_interface *touch_data = NULL;
+
+	if (!touch_pdata)
+		return -ENOMEM;
+
+	touch_data = touch_pdata->touch_data[0];
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", touch_data->thp_downthreshold);
+}
+
+static ssize_t thp_downthreshold_store(struct device *dev,
+				       struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct xiaomi_touch_interface *touch_data = NULL;
+	unsigned int input;
+
+	if (!touch_pdata)
+		return -ENOMEM;
+
+	touch_data = touch_pdata->touch_data[0];
+
+	if (sscanf(buf, "%d", &input) < 0)
+		return -EINVAL;
+
+	pr_info("%s,%d\n", __func__, input);
+	touch_data->thp_downthreshold = input;
+	sysfs_notify(&xiaomi_touch_dev.dev->kobj, NULL,  "touch_thp_downthd");
+
+	return count;
+}
+
+static ssize_t thp_upthreshold_show(struct device *dev,
+				    struct device_attribute *attr, char *buf)
+{
+	struct xiaomi_touch_interface *touch_data = NULL;
+
+	if (!touch_pdata)
+		return -ENOMEM;
+
+	touch_data = touch_pdata->touch_data[0];
+
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", touch_data->thp_upthreshold);
+}
+
+static ssize_t thp_upthreshold_store(struct device *dev,
+				     struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct xiaomi_touch_interface *touch_data = NULL;
+	unsigned int input;
+
+	if (!touch_pdata)
+		return -ENOMEM;
+
+	touch_data = touch_pdata->touch_data[0];
+
+	if (sscanf(buf, "%d", &input) < 0)
+		return -EINVAL;
+
+	pr_info("%s,%d\n", __func__, input);
+	touch_data->thp_upthreshold = input;
+	sysfs_notify(&xiaomi_touch_dev.dev->kobj, NULL,  "touch_thp_upthd");
+
+	return count;
+}
+
+static ssize_t thp_movethreshold_store(struct device *dev,
+				       struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct xiaomi_touch_interface *touch_data = NULL;
+	unsigned int input;
+
+	if (!touch_pdata)
+		return -ENOMEM;
+
+	touch_data = touch_pdata->touch_data[0];
+
+	if (sscanf(buf, "%d", &input) < 0)
+		return -EINVAL;
+
+	pr_info("%s,%d\n", __func__, input);
+	touch_data->thp_movethreshold = input;
+	sysfs_notify(&xiaomi_touch_dev.dev->kobj, NULL,  "touch_thp_movethd");
+
+	return count;
+}
+
+
+static ssize_t thp_movethreshold_show(struct device *dev,
+				      struct device_attribute *attr, char *buf)
+{
+	struct xiaomi_touch_interface *touch_data = NULL;
+
+	if (!touch_pdata)
+		return -ENOMEM;
+
+	touch_data = touch_pdata->touch_data[0];
+
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", touch_data->thp_movethreshold);
+}
+
+static ssize_t thp_islandthreshold_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct xiaomi_touch_interface *touch_data = NULL;
+	unsigned int input;
+
+	if (!touch_pdata)
+		return -ENOMEM;
+
+	touch_data = touch_pdata->touch_data[0];
+
+	if (sscanf(buf, "%d", &input) < 0)
+		return -EINVAL;
+
+	pr_info("%s,%d\n", __func__, input);
+	touch_data->thp_islandthreshold = input;
+	sysfs_notify(&xiaomi_touch_dev.dev->kobj, NULL,  "touch_thp_islandthd");
+
+	return count;
+}
+
+
+static ssize_t thp_islandthreshold_show(struct device *dev,
+					struct device_attribute *attr, char *buf)
+{
+	struct xiaomi_touch_interface *touch_data = NULL;
+
+	if (!touch_pdata)
+		return -ENOMEM;
+
+	touch_data = touch_pdata->touch_data[0];
+
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", touch_data->thp_islandthreshold);
+}
+
+static ssize_t thp_noisefilter_store(struct device *dev,
+				     struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct xiaomi_touch_interface *touch_data = NULL;
+	unsigned int input;
+
+	if (!touch_pdata)
+		return -ENOMEM;
+
+	touch_data = touch_pdata->touch_data[0];
+
+	if (sscanf(buf, "%d", &input) < 0)
+		return -EINVAL;
+
+	pr_info("%s,%d\n", __func__, input);
+	touch_data->thp_noisefilter = input;
+	sysfs_notify(&xiaomi_touch_dev.dev->kobj, NULL,  "touch_thp_noisefilter");
+
+	return count;
+}
+
+static ssize_t thp_noisefilter_show(struct device *dev,
+				    struct device_attribute *attr, char *buf)
+{
+	struct xiaomi_touch_interface *touch_data = NULL;
+
+	if (!touch_pdata)
+		return -ENOMEM;
+
+	touch_data = touch_pdata->touch_data[0];
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", touch_data->thp_noisefilter);
+}
+
+static ssize_t thp_smooth_store(struct device *dev,
+				struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct xiaomi_touch_interface *touch_data = NULL;
+	unsigned int input;
+
+	if (!touch_pdata)
+		return -ENOMEM;
+
+	touch_data = touch_pdata->touch_data[0];
+
+	if (sscanf(buf, "%d", &input) < 0)
+		return -EINVAL;
+
+	pr_info("%s,%d\n", __func__, input);
+	touch_data->thp_smooth = input;
+	sysfs_notify(&xiaomi_touch_dev.dev->kobj, NULL,  "touch_thp_smooth");
+
+	return count;
+}
+
+static ssize_t thp_smooth_show(struct device *dev,
+			       struct device_attribute *attr, char *buf)
+{
+	struct xiaomi_touch_interface *touch_data = NULL;
+
+	if (!touch_pdata)
+		return -ENOMEM;
+
+	touch_data = touch_pdata->touch_data[0];
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", touch_data->thp_smooth);
+}
+
+static ssize_t thp_dump_frame_store(struct device *dev,
+				    struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct xiaomi_touch_interface *touch_data = NULL;
+	unsigned int input;
+
+	if (!touch_pdata)
+		return -ENOMEM;
+
+	touch_data = touch_pdata->touch_data[0];
+
+	if (sscanf(buf, "%d", &input) < 0)
+		return -EINVAL;
+
+	pr_info("%s,%d\n", __func__, input);
+	touch_data->thp_dump_raw = input;
+	sysfs_notify(&xiaomi_touch_dev.dev->kobj, NULL,  "touch_thp_dump");
+
+	return count;
+}
+
+static ssize_t thp_dump_frame_show(struct device *dev,
+				   struct device_attribute *attr, char *buf)
+{
+	struct xiaomi_touch_interface *touch_data = NULL;
+
+	if (!touch_pdata)
+		return -ENOMEM;
+
+	touch_data = touch_pdata->touch_data[0];
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", touch_data->thp_dump_raw);
+}
+
+
+static ssize_t update_rawdata_show(struct device *dev,
+				   struct device_attribute *attr, char *buf)
+{
+	int remaining = 0;
+
+	if (!touch_pdata->raw_data)
+		return -ENOMEM;
+
+	if (touch_pdata->raw_head == touch_pdata->raw_tail)
+		return snprintf(buf, PAGE_SIZE, "%s\n", "0");
+
+	if (touch_pdata->raw_head < touch_pdata->raw_tail)
+		remaining = touch_pdata->raw_tail - touch_pdata->raw_head;
+	else
+		remaining = RAW_BUF_NUM - touch_pdata->raw_head + touch_pdata->raw_tail;
+	memcpy((unsigned char *)touch_pdata->raw_data,  (unsigned char *)touch_pdata->raw_buf[touch_pdata->raw_head],  touch_pdata->raw_len);
+	spin_lock(&touch_pdata->raw_lock);
+	touch_pdata->raw_head++;
+	if (touch_pdata->raw_head == RAW_BUF_NUM)
+		touch_pdata->raw_head = 0;
+	spin_unlock(&touch_pdata->raw_lock);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", remaining);
+}
+
+static ssize_t update_rawdata_store(struct device *dev,
+				    struct device_attribute *attr, const char *buf, size_t count)
+{
+	if (!touch_pdata->raw_data)
+		return -ENOMEM;
+
+	if (touch_pdata->raw_head != touch_pdata->raw_tail)
+		sysfs_notify(&xiaomi_touch_dev.dev->kobj, NULL,  "update_rawdata");
+
+	pr_info("%s notify buf\n", __func__);
+
+	return count;
+}
+
+static ssize_t enable_clicktouch_store(struct device *dev,
+				       struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct xiaomi_touch_interface *touch_data = NULL;
+	unsigned int input;
+
+	if (!touch_pdata)
+		return -ENOMEM;
+
+	touch_data = touch_pdata->touch_data[0];
+
+	if (sscanf(buf, "%d", &input) < 0)
+		return -EINVAL;
+
+	pr_info("%s,%d\n", __func__, input);
+	if (touch_data->enable_clicktouch_raw)
+		touch_data->enable_clicktouch_raw(input);
+
+	return count;
+}
+
+static ssize_t enable_clicktouch_show(struct device *dev,
+				      struct device_attribute *attr, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%s\n", "1");
+}
+
+int update_clicktouch_raw(void)
+{
+	sysfs_notify(&xiaomi_touch_dev.dev->kobj, NULL,  "clicktouch_raw");
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(update_clicktouch_raw);
+
 int xiaomi_touch_set_suspend_state(int state)
 {
 	if (!touch_pdata)
@@ -469,11 +1098,47 @@ static ssize_t fod_press_status_show(struct device *dev,
 	return snprintf(buf, PAGE_SIZE, "%d\n", pdata->fod_press_status_value);
 }
 
+static DEVICE_ATTR(touch_thp_cmd_data, (0664),
+		   thp_cmd_data_show, thp_cmd_data_store);
+
+static DEVICE_ATTR(touch_thp_cmd, (0664),
+		   thp_cmd_status_show, thp_cmd_status_store);
+
+static DEVICE_ATTR(touch_thp_islandthd, (0664),
+		   thp_islandthreshold_show, thp_islandthreshold_store);
+
+static DEVICE_ATTR(touch_thp_downthd, (0664),
+		   thp_downthreshold_show, thp_downthreshold_store);
+
+static DEVICE_ATTR(touch_thp_upthd, (0664),
+		   thp_upthreshold_show, thp_upthreshold_store);
+
+static DEVICE_ATTR(touch_thp_movethd, (0664),
+		   thp_movethreshold_show, thp_movethreshold_store);
+
+static DEVICE_ATTR(touch_thp_smooth, (0664),
+		   thp_smooth_show, thp_smooth_store);
+
+static DEVICE_ATTR(touch_thp_dump, (0664),
+		   thp_dump_frame_show, thp_dump_frame_store);
+
+static DEVICE_ATTR(touch_thp_noisefilter, (0664),
+		   thp_noisefilter_show, thp_noisefilter_store);
+
+static DEVICE_ATTR(enable_touch_raw, (0664),
+		   enable_touchraw_show, enable_touchraw_store);
+
+static DEVICE_ATTR(enable_touch_delta, (0664),
+		   enable_touchdelta_show, enable_touchdelta_store);
+
 static DEVICE_ATTR(palm_sensor, (0664),
 		   palm_sensor_show, palm_sensor_store);
 
 static DEVICE_ATTR(prox_sensor, (0664),
 		   prox_sensor_show, prox_sensor_store);
+
+static DEVICE_ATTR(clicktouch_raw, (0664),
+		   enable_clicktouch_show, enable_clicktouch_store);
 
 static DEVICE_ATTR(panel_vendor, (0444), panel_vendor_show, NULL);
 
@@ -483,24 +1148,111 @@ static DEVICE_ATTR(panel_display, (0444), panel_display_show, NULL);
 
 static DEVICE_ATTR(touch_vendor, (0444), touch_vendor_show, NULL);
 
+static DEVICE_ATTR(touch_thp_tx_num, (0444), xiaomi_touch_tx_num_show, NULL);
+
+static DEVICE_ATTR(touch_thp_rx_num, (0444), xiaomi_touch_rx_num_show, NULL);
+
+static DEVICE_ATTR(touch_thp_x_resolution, (0444), xiaomi_touch_x_resolution_show, NULL);
+
+static DEVICE_ATTR(touch_thp_y_resolution, (0444), xiaomi_touch_y_resolution_show, NULL);
+
 static DEVICE_ATTR(suspend_state, 0644, xiaomi_touch_suspend_state, NULL);
+
+static DEVICE_ATTR(update_rawdata, (0664), update_rawdata_show,
+		   update_rawdata_store);
 
 static DEVICE_ATTR(fod_press_status, (0664), fod_press_status_show, NULL);
 
 static DEVICE_ATTR(gesture_single_tap_state, (0664), gesture_single_tap_value_show, NULL);
 
 static struct attribute *touch_attr_group[] = {
+	&dev_attr_enable_touch_raw.attr,
+	&dev_attr_enable_touch_delta.attr,
+	&dev_attr_touch_thp_cmd.attr,
+	&dev_attr_touch_thp_cmd_data.attr,
+	&dev_attr_clicktouch_raw.attr,
+	&dev_attr_touch_thp_tx_num.attr,
+	&dev_attr_touch_thp_rx_num.attr,
+	&dev_attr_touch_thp_x_resolution.attr,
+	&dev_attr_touch_thp_y_resolution.attr,
+	&dev_attr_touch_thp_downthd.attr,
+	&dev_attr_touch_thp_upthd.attr,
+	&dev_attr_touch_thp_movethd.attr,
+	&dev_attr_touch_thp_islandthd.attr,
+	&dev_attr_touch_thp_smooth.attr,
+	&dev_attr_touch_thp_dump.attr,
+	&dev_attr_touch_thp_noisefilter.attr,
 	&dev_attr_palm_sensor.attr,
 	&dev_attr_prox_sensor.attr,
 	&dev_attr_panel_vendor.attr,
 	&dev_attr_panel_color.attr,
 	&dev_attr_panel_display.attr,
 	&dev_attr_touch_vendor.attr,
+	&dev_attr_update_rawdata.attr,
 	&dev_attr_suspend_state.attr,
 	&dev_attr_fod_press_status.attr,
 	&dev_attr_gesture_single_tap_state.attr,
 	NULL,
 };
+
+static void *event_start(struct seq_file *m, loff_t *p)
+{
+	int pos = 0;
+	struct last_touch_event *event;
+
+	if (!touch_pdata || !touch_pdata->last_touch_events)
+		return NULL;
+	event = touch_pdata->last_touch_events;
+	if (*p >= LAST_TOUCH_EVENTS_MAX)
+		return NULL;
+
+	pos = (event->head + *p) & (LAST_TOUCH_EVENTS_MAX - 1);
+	return event->touch_event_buf + pos;
+}
+
+static void *event_next(struct seq_file *m, void *v, loff_t *p)
+{
+	int pos = 0;
+	struct last_touch_event *event;
+
+	if (!touch_pdata || !touch_pdata->last_touch_events)
+		return NULL;
+	event = touch_pdata->last_touch_events;
+	if (++*p >= LAST_TOUCH_EVENTS_MAX)
+		return NULL;
+	pos = (event->head + *p) & (LAST_TOUCH_EVENTS_MAX - 1);
+	return event->touch_event_buf + pos;
+}
+
+static int32_t event_show(struct seq_file *m, void *v)
+{
+	struct touch_event *event_info;
+	struct rtc_time tm;
+
+	event_info = (struct touch_event *)v;
+
+	if (event_info->state == EVENT_INIT)
+		return 0;
+	rtc_time64_to_tm(event_info->touch_time.tv_sec, &tm);
+	seq_printf(m, "%d-%02d-%02d %02d:%02d:%02d.%09lu UTC Finger (%2d) %s\n",
+		   tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+		   tm.tm_hour, tm.tm_min, tm.tm_sec, event_info->touch_time.tv_nsec,
+		   event_info->slot, event_info->state == EVENT_DOWN ? "P" : "R");
+	return 0;
+}
+
+static void event_stop(struct seq_file *m, void *v)
+{
+}
+
+const struct seq_operations last_touch_events_seq_ops = {
+	.start = event_start,
+	.next = event_next,
+	.stop = event_stop,
+	.show = event_show,
+};
+
+
 
 static const struct of_device_id xiaomi_touch_of_match[] = {
 	{ .compatible = "xiaomi-touch", },
@@ -596,6 +1348,12 @@ static int xiaomi_touch_probe(struct platform_device *pdev)
 		goto sys_group_err;
 	}
 
+	pdata->last_touch_events = kzalloc(sizeof(struct last_touch_event), GFP_KERNEL);
+	if (pdata->last_touch_events == NULL) {
+		ret = -ENOMEM;
+		pr_err("%s: alloc mem for last touch evnets\n", __func__);
+		goto sys_group_err;
+	}
 	pdata->device = &xiaomi_touch_dev;
 	dev_set_drvdata(xiaomi_touch_dev.dev, pdata);
 
@@ -608,6 +1366,7 @@ static int xiaomi_touch_probe(struct platform_device *pdev)
 		ret = -ENODEV;
 		goto sys_group_err;
 	}
+	pdata->last_touch_events_proc = proc_create_seq("last_touch_events", 0644, NULL, &last_touch_events_seq_ops);
 
 	pr_info("%s over\n", __func__);
 
@@ -622,7 +1381,10 @@ sys_group_err:
 		kfree(pdata->touch_data[1]);
 		pdata->touch_data[1] = NULL;
 	}
-
+	if (pdata->last_touch_events) {
+		kfree(pdata->last_touch_events);
+		pdata->last_touch_events = NULL;
+	}
 data_mem_err:
 	device_destroy(xiaomi_touch_dev.class, 'T');
 device_create_err:
@@ -664,6 +1426,15 @@ static int xiaomi_touch_remove(struct platform_device *pdev)
 			kfree(touch_pdata->raw_buf[i]);
 			touch_pdata->raw_buf[i] = NULL;
 		}
+	}
+
+	if (touch_pdata->last_touch_events) {
+		kfree(touch_pdata->last_touch_events);
+		touch_pdata->last_touch_events = NULL;
+	}
+	if (touch_pdata->last_touch_events_proc != NULL) {
+		remove_proc_entry("last_touch_events", NULL);
+		touch_pdata->last_touch_events_proc = NULL;
 	}
 
 	if (touch_pdata->touch_data[0]) {

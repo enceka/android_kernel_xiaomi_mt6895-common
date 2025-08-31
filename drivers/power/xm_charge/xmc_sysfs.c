@@ -20,43 +20,68 @@
 
 #define MAX_UEVENT_PROP_NUM	20
 
-#define XMC_SYSFS_FIELD_RW(_name, _prop)				\
+#define XMC_SYSFS_FIELD_RW(_name, _prop, _report)			\
 {									\
 	.attr	= __ATTR(_name, 0644, xmc_sysfs_show, xmc_sysfs_store),	\
 	.prop	= _prop,						\
+	.report_uevent = _report,					\
 }
 
-#define XMC_SYSFS_FIELD_RO(_name, _prop)				\
+#define XMC_SYSFS_FIELD_RO(_name, _prop, _report)			\
 {									\
 	.attr	= __ATTR(_name, 0444, xmc_sysfs_show, NULL),		\
 	.prop	= _prop,				  		\
+	.report_uevent = _report,					\
 }
 
 struct xmc_sysfs_info {
 	struct device_attribute attr;
 	enum xmc_sysfs_prop prop;
+	bool report_uevent;
 };
 
 /* must in same order with xmc_sysfs_prop */
 static const char * const xmc_sysfs_prop_name[] = {
 	/* /sys/power_supply/usb */
-	[POWER_SUPPLY_PROP_USB_BEGIN]		= "POWER_SUPPLY_USB_BEGIN",
 	[POWER_SUPPLY_PROP_REAL_TYPE]		= "POWER_SUPPLY_REAL_TYPE",
 	[POWER_SUPPLY_PROP_QUICK_CHARGE_TYPE]	= "POWER_SUPPLY_QUICK_CHARGE_TYPE",
 	[POWER_SUPPLY_PROP_TYPEC_MODE]		= "POWER_SUPPLY_TYPEC_MODE",
 	[POWER_SUPPLY_PROP_CONNECTOR_TEMP]	= "POWER_SUPPLY_CONNECTOR_TEMP",
 	[POWER_SUPPLY_PROP_TYPEC_CC_ORIENTATION]= "POWER_SUPPLY_TYPEC_CC_ORIENTATION",
 	[POWER_SUPPLY_PROP_PD_AUTHENTICATION]	= "POWER_SUPPLY_PD_AUTHENTICATION",
-	[POWER_SUPPLY_PROP_INPUT_SUSPEND]	= "POWER_SUPPLY_INPUT_SUSPEND",
-	[POWER_SUPPLY_PROP_USB_END]		= "POWER_SUPPLY_USB_END",
+	[POWER_SUPPLY_PROP_APDO_MAX]		= "POWER_SUPPLY_APDO_MAX",
+	[POWER_SUPPLY_PROP_POWER_MAX]		= "POWER_SUPPLY_POWER_MAX",
+	[POWER_SUPPLY_PROP_FFC_ENABLE]		= "POWER_SUPPLY_FFC_ENABLE",
+	[POWER_SUPPLY_PROP_INPUT_SUSPEND_USB]	= "POWER_SUPPLY_INPUT_SUSPEND_USB",
+	[POWER_SUPPLY_PROP_MTBF_TEST]		= "POWER_SUPPLY_MTBF_TEST",
+
+	/* /sys/power_supply/battery */
+	[POWER_SUPPLY_PROP_INPUT_SUSPEND_BATTERY]	= "POWER_SUPPLY_INPUT_SUSPEND_BATTERY",
+	[POWER_SUPPLY_PROP_NIGHT_CHARGING]	= "POWER_SUPPLY_NIGHT_CHARGING",
+	[POWER_SUPPLY_PROP_SMART_BATT]		= "POWER_SUPPLY_SMART_BATT",
 
 	/* /sys/power_supply/bms */
-	[POWER_SUPPLY_PROP_BMS_BEGIN]		= "POWER_SUPPLY_BMS_BEGIN",
 	[POWER_SUPPLY_PROP_FASTCHARGE_MODE]	= "POWER_SUPPLY_FASTCHARGE_MODE",
 	[POWER_SUPPLY_PROP_RESISTANCE_ID]	= "POWER_SUPPLY_RESISTANCE_ID",
 	[POWER_SUPPLY_PROP_SOC_DECIMAL]		= "POWER_SUPPLY_SOC_DECIMAL",
 	[POWER_SUPPLY_PROP_SOC_DECIMAL_RATE]	= "POWER_SUPPLY_SOC_DECIMAL_RATE",
-	[POWER_SUPPLY_PROP_BMS_END]		= "POWER_SUPPLY_BMS_END",
+	[POWER_SUPPLY_PROP_SHUTDOWN_DELAY]	= "POWER_SUPPLY_SHUTDOWN_DELAY",
+	[POWER_SUPPLY_PROP_SHUTDOWN_MODE]	= "POWER_SUPPLY_SHUTDOWN_MODE",
+	[POWER_SUPPLY_PROP_SOH]			= "POWER_SUPPLY_SOH",
+	[POWER_SUPPLY_PROP_RM]			= "POWER_SUPPLY_RM",
+	[POWER_SUPPLY_PROP_FCC]			= "POWER_SUPPLY_FCC",
+	[POWER_SUPPLY_PROP_MAX_TEMP]		= "POWER_SUPPLY_TEMP_MAX",
+	[POWER_SUPPLY_PROP_TIME_OT]		= "POWER_SUPPLY_TIME_OT",
+	[POWER_SUPPLY_PROP_QMAX0]		= "POWER_SUPPLY_QMAX0",
+	[POWER_SUPPLY_PROP_QMAX1]		= "POWER_SUPPLY_QMAX1",
+	[POWER_SUPPLY_PROP_TRUE_REM_Q]		= "POWER_SUPPLY_TRUE_REM_Q",
+	[POWER_SUPPLY_PROP_INITIAL_Q]		= "POWER_SUPPLY_INITIAL_Q",
+	[POWER_SUPPLY_PROP_TRUE_FULL_CHG_Q]	= "POWER_SUPPLY_TRUE_FULL_CHG_Q",
+	[POWER_SUPPLY_PROP_T_SIM]		= "POWER_SUPPLY_T_SIM",
+	[POWER_SUPPLY_PROP_CELL_GRID]		= "POWER_SUPPLY_CELL_GRID",
+	[POWER_SUPPLY_PROP_CHIP_OK]			= "POWER_SUPPLY_PROP_CHIP_OK",
+	[POWER_SUPPLY_PROP_RSOC]			= "POWER_SUPPLY_PROP_RSOC",
+	[POWER_SUPPLY_PROP_CAPACITY_RAW]			= "POWER_SUPPLY_PROP_CAPACITY_RAW",
 };
 
 static const char * const bc12_type_text[] = {
@@ -103,7 +128,10 @@ static int xmc_get_charge_status(struct charge_chip *chip)
 {
 	int charge_status = POWER_SUPPLY_STATUS_DISCHARGING;
 
-	if (chip->usb_typec.bc12_type || chip->usb_typec.qc_type || chip->usb_typec.pd_type) {
+	if (chip->battery.shutdown_flag)
+		return charge_status;
+
+	if (chip->usb_typec.bc12_type || chip->usb_typec.qc_type || chip->usb_typec.pd_type || chip->fake_charger_present) {
 		if (chip->usb_typec.cmd_input_suspend) {
 			charge_status = POWER_SUPPLY_STATUS_NOT_CHARGING;
 		} else {
@@ -124,7 +152,7 @@ static int xmc_get_battery_health(struct charge_chip *chip)
 	union power_supply_propval pval = {0,};
 	int battery_health = POWER_SUPPLY_HEALTH_GOOD;
 
-	power_supply_get_property(chip->bms_psy, POWER_SUPPLY_PROP_TEMP, &pval);
+	power_supply_get_property(chip->battery_psy, POWER_SUPPLY_PROP_TEMP, &pval);
 
 	if (pval.intval <= -100)
 		battery_health = POWER_SUPPLY_HEALTH_COLD;
@@ -144,7 +172,89 @@ static int xmc_get_battery_health(struct charge_chip *chip)
 
 static int xmc_get_quick_charge_type(struct charge_chip *chip)
 {
-	return 0;
+	if (chip->battery.tbat < 0)
+		return QUICK_CHARGE_NORMAL;
+
+	if (chip->usb_typec.pd_type == XMC_PD_TYPE_PPS && (chip->adapter.adapter_svid == USBPD_MI_SVID || chip->adapter.adapter_svid == 0x2B01)) {
+		if (chip->adapter.apdo_max >= 50)
+			return QUICK_CHARGE_SUPER;
+		else
+			return QUICK_CHARGE_TURBE;
+	}
+
+	if (chip->usb_typec.qc_type == XMC_QC_TYPE_HVDCP_3_27W)
+		return QUICK_CHARGE_FLASH;
+	else if (chip->usb_typec.qc_type || chip->usb_typec.pd_type)
+		return QUICK_CHARGE_FAST;
+	else if (chip->usb_typec.qc_type)
+		return QUICK_CHARGE_NORMAL;
+	else
+		return QUICK_CHARGE_NORMAL;
+}
+
+static int xmc_get_soc_decimal(struct charge_chip *chip)
+{
+	return chip->battery.rawsoc % 100;
+}
+
+static int xmc_get_soc_decimal_rate(struct charge_chip *chip)
+{
+	int rsoc = 0, i = 0;
+
+	rsoc = chip->battery.rsoc;
+
+	if (chip->battery.dec_rate_len <= 0)
+		return 0;
+
+	for (i = 0; i < chip->battery.dec_rate_len; i += 2) {
+		if (rsoc < chip->battery.dec_rate_seq[i])
+			return chip->battery.dec_rate_seq[i - 1];
+	}
+
+	return chip->battery.dec_rate_seq[chip->battery.dec_rate_len - 1];
+}
+
+static int xmc_shutdown_delay(struct charge_chip *chip)
+{
+	union power_supply_propval pval = {0, };
+	static bool last_shutdown_delay = false;
+	int result = 0;
+
+	if (chip->battery.uisoc == 0) {
+		power_supply_get_property(chip->battery_psy, POWER_SUPPLY_PROP_STATUS, &pval);
+		if (pval.intval == POWER_SUPPLY_STATUS_CHARGING) {
+			chip->battery.shutdown_delay = false;
+			if (chip->battery.vbat > chip->battery.critical_shutdown_vbat)
+				result = 1;
+			else
+				chip->battery.shutdown_flag = true;
+		} else {
+			if (chip->battery.vbat > chip->battery.normal_shutdown_vbat) {
+				chip->battery.shutdown_delay = false;
+				result = 1;
+			} else if (chip->battery.vbat > chip->battery.critical_shutdown_vbat) {
+				chip->battery.shutdown_delay = true;
+				result = 1;
+			} else {
+				chip->battery.shutdown_delay = false;
+				chip->battery.shutdown_flag = true;
+				result = 0;
+			}
+		}
+	} else {
+		chip->battery.shutdown_delay = false;
+		result = chip->battery.uisoc;
+	}
+
+	if (chip->battery.shutdown_flag)
+		result = 0;
+
+	if (last_shutdown_delay != chip->battery.shutdown_delay || result == 0) {
+		last_shutdown_delay = chip->battery.shutdown_delay;
+		xmc_sysfs_report_uevent(chip->bms_psy);
+	}
+
+	return result;
 }
 
 static enum power_supply_property battery_props[] = {
@@ -159,6 +269,8 @@ static enum power_supply_property battery_props[] = {
 	POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN,
 	POWER_SUPPLY_PROP_CHARGE_FULL,
 	POWER_SUPPLY_PROP_CHARGE_COUNTER,
+	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT,
+	POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT,
 	POWER_SUPPLY_PROP_CAPACITY,
 	POWER_SUPPLY_PROP_TEMP,
 	POWER_SUPPLY_PROP_TYPE,
@@ -179,19 +291,44 @@ static int battery_get_prop(struct power_supply *psy, enum power_supply_property
 	case POWER_SUPPLY_PROP_PRESENT:
 	case POWER_SUPPLY_PROP_ONLINE:
 		val->intval = 1;
-		break;	
+		break;
+	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
+		if (chip->battery.fake_vbat)
+			val->intval = chip->battery.fake_vbat;
+		else
+			power_supply_get_property(chip->bms_psy, prop, val);
+		break;
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT:
+		val->intval = chip->sic_current * 1000;
+		break;
+	case POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT:
+		val->intval = chip->thermal_level;
+		break;
+	case POWER_SUPPLY_PROP_CAPACITY:
+		if (chip->battery.fake_uisoc) {
+			val->intval = chip->battery.fake_uisoc;
+		} else {
+			if (chip->init_done)
+				val->intval = xmc_shutdown_delay(chip);
+			else
+				power_supply_get_property(chip->bms_psy, prop, val);
+		}
+		break;
+	case POWER_SUPPLY_PROP_TEMP:
+		if (chip->battery.fake_tbat != 8888)
+			val->intval = chip->battery.fake_tbat;
+		else
+			power_supply_get_property(chip->bms_psy, prop, val);
+		break;
 	case POWER_SUPPLY_PROP_TYPE:
 		val->intval = psy->desc->type;
 		break;
 	case POWER_SUPPLY_PROP_TECHNOLOGY:
 	case POWER_SUPPLY_PROP_CYCLE_COUNT:
-	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
 	case POWER_SUPPLY_PROP_CURRENT_NOW:
 	case POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN:
 	case POWER_SUPPLY_PROP_CHARGE_FULL:
 	case POWER_SUPPLY_PROP_CHARGE_COUNTER:
-	case POWER_SUPPLY_PROP_CAPACITY:
-	case POWER_SUPPLY_PROP_TEMP:
 		power_supply_get_property(chip->bms_psy, prop, val);
 		break;
 	default:
@@ -204,10 +341,34 @@ static int battery_get_prop(struct power_supply *psy, enum power_supply_property
 
 static int battery_set_prop(struct power_supply *psy, enum power_supply_property psp, const union power_supply_propval *val)
 {
-//	struct charge_chip *chip = power_supply_get_drvdata(psy);
+	struct charge_chip *chip = power_supply_get_drvdata(psy);
 	int ret = 0;
 
 	switch (psp) {
+	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
+		chip->battery.fake_vbat = val->intval;
+		break;
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT:
+		if (val->intval > 0)
+			chip->sic_current = cut_cap(val->intval / 1000, 300, chip->thermal_limit[THERMAL_TABLE_NUM - 1][0]);
+		break;
+	case POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT:
+		if (val->intval < 0 || chip->thermal_level < 0) {
+			if (val->intval <= -THERMAL_LEVEL_NUM - 1)
+				chip->thermal_level = 0;
+			else if (val->intval < 0)
+				chip->thermal_level = val->intval;
+		} else if (val->intval <= THERMAL_LEVEL_NUM - 1) {
+			chip->thermal_level = val->intval;
+		}
+		break;
+	case POWER_SUPPLY_PROP_CAPACITY:
+		chip->battery.fake_uisoc = val->intval;
+		power_supply_changed(chip->battery_psy);
+		break;
+	case POWER_SUPPLY_PROP_TEMP:
+		chip->battery.fake_tbat = val->intval;
+		break;
 	default:
 		return -EINVAL;
 	}
@@ -220,6 +381,13 @@ static int battery_prop_is_writeable(struct power_supply *psy, enum power_supply
 	int ret = 0;
 
 	switch (prop) {
+	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT:
+	case POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT:
+	case POWER_SUPPLY_PROP_CAPACITY:
+	case POWER_SUPPLY_PROP_TEMP:
+		ret = 1;
+		break;
 	default:
 		ret = 0;
 		break;
@@ -253,19 +421,32 @@ static int usb_get_prop(struct power_supply *psy, enum power_supply_property pro
 	switch (prop) {
 	case POWER_SUPPLY_PROP_PRESENT:
 	case POWER_SUPPLY_PROP_ONLINE:
-		if (chip->usb_typec.cmd_input_suspend)
+		val->intval = (chip->usb_typec.bc12_type || chip->usb_typec.qc_type || chip->usb_typec.pd_type || chip->fake_charger_present);
+		if (chip->battery.shutdown_flag)
 			val->intval = 0;
-		else
-			val->intval = (chip->usb_typec.bc12_type == XMC_BC12_TYPE_SDP || chip->usb_typec.bc12_type == XMC_BC12_TYPE_CDP);
 		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
-		xmc_ops_get_vbus(chip->bbc_dev, &val->intval);
+		if (chip->bbc.vbus_disable)
+			xmc_ops_get_vbus(chip->master_cp_dev, &val->intval);
+		else
+			xmc_ops_get_vbus(chip->bbc_dev, &val->intval);
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_NOW:
 		xmc_ops_get_ibus(chip->bbc_dev, &val->intval);
+		if (chip->pdm.master_cp_enable)
+			val->intval += chip->pdm.master_cp_ibus;
+		if (chip->pdm.slave_cp_enable)
+			val->intval += chip->pdm.slave_cp_ibus;
 		break;
 	case POWER_SUPPLY_PROP_TYPE:
-		val->intval = psy->desc->type;
+		if (!(chip->usb_typec.bc12_type || chip->usb_typec.qc_type || chip->usb_typec.pd_type) && chip->fake_charger_present) {
+			val->intval = POWER_SUPPLY_TYPE_USB;
+			break;
+		}
+		if (chip->usb_typec.bc12_type == XMC_BC12_TYPE_SDP || chip->usb_typec.bc12_type == XMC_BC12_TYPE_CDP || chip->usb_typec.pd_type)
+			val->intval = POWER_SUPPLY_TYPE_USB;
+		else
+			val->intval = POWER_SUPPLY_TYPE_MAINS;
 		break;
 	default:
 		xmc_err("usb unsupported property %d\n", prop);
@@ -324,11 +505,10 @@ static int ac_get_prop(struct power_supply *psy, enum power_supply_property prop
 	switch (prop) {
 	case POWER_SUPPLY_PROP_PRESENT:
 	case POWER_SUPPLY_PROP_ONLINE:
-		if (chip->usb_typec.cmd_input_suspend)
+		val->intval = (chip->usb_typec.bc12_type == XMC_BC12_TYPE_DCP || chip->usb_typec.bc12_type == XMC_BC12_TYPE_OCP ||
+			chip->usb_typec.bc12_type == XMC_BC12_TYPE_FLOAT || chip->usb_typec.qc_type || chip->usb_typec.pd_type);
+		if (chip->battery.shutdown_flag)
 			val->intval = 0;
-		else
-			val->intval = (chip->usb_typec.bc12_type == XMC_BC12_TYPE_DCP || chip->usb_typec.bc12_type == XMC_BC12_TYPE_OCP ||
-				chip->usb_typec.bc12_type == XMC_BC12_TYPE_FLOAT || chip->usb_typec.qc_type || chip->usb_typec.pd_type);
 		break;
 	case POWER_SUPPLY_PROP_TYPE:
 		val->intval = psy->desc->type;
@@ -388,8 +568,29 @@ int xmc_sysfs_get_property(struct power_supply *psy, enum xmc_sysfs_prop prop, u
 	case POWER_SUPPLY_PROP_PD_AUTHENTICATION:
 		val->intval = chip->adapter.authenticate_success;
 		break;
-	case POWER_SUPPLY_PROP_INPUT_SUSPEND:
+	case POWER_SUPPLY_PROP_APDO_MAX:
+	case POWER_SUPPLY_PROP_POWER_MAX:
+		val->intval = chip->adapter.apdo_max;
+		break;
+	case POWER_SUPPLY_PROP_FFC_ENABLE:
+		val->intval = chip->ffc_enable;
+		break;
+	case POWER_SUPPLY_PROP_INPUT_SUSPEND_USB:
 		val->intval = chip->usb_typec.cmd_input_suspend;
+		break;
+	case POWER_SUPPLY_PROP_MTBF_TEST:
+		val->intval = chip->mtbf_test;
+		break;
+
+	/* /sys/power_supply/battery */
+	case POWER_SUPPLY_PROP_INPUT_SUSPEND_BATTERY:
+		val->intval = chip->usb_typec.cmd_input_suspend;
+		break;
+	case POWER_SUPPLY_PROP_NIGHT_CHARGING:
+		val->intval = chip->night_charging;
+		break;
+	case POWER_SUPPLY_PROP_SMART_BATT:
+		val->intval = chip->smart_fv_shift;
 		break;
 
 	/* /sys/power_supply/bms */
@@ -399,8 +600,61 @@ int xmc_sysfs_get_property(struct power_supply *psy, enum xmc_sysfs_prop prop, u
 		val->intval = 100000;
 		break;
 	case POWER_SUPPLY_PROP_SOC_DECIMAL:
+		val->intval = xmc_get_soc_decimal(chip);
 		break;
 	case POWER_SUPPLY_PROP_SOC_DECIMAL_RATE:
+		val->intval = xmc_get_soc_decimal_rate(chip);
+		break;
+	case POWER_SUPPLY_PROP_SHUTDOWN_DELAY:
+		val->intval = chip->battery.shutdown_delay;
+		break;
+	case POWER_SUPPLY_PROP_SHUTDOWN_MODE:
+		val->intval = chip->battery.shutdown_mode;
+		break;
+	case POWER_SUPPLY_PROP_SOH:
+		val->intval = chip->battery.soh ? 95 : chip->battery.soh;
+		break;
+	case POWER_SUPPLY_PROP_RM:
+		val->intval = chip->battery.rm;
+		break;
+	case POWER_SUPPLY_PROP_FCC:
+		val->intval = chip->battery.fcc;
+		break;
+	case POWER_SUPPLY_PROP_MAX_TEMP:
+		xmc_ops_get_gauge_temp_max(chip->gauge_dev, &val->intval);
+		break;
+	case POWER_SUPPLY_PROP_TIME_OT:
+		xmc_ops_get_gauge_time_ot(chip->gauge_dev, &val->intval);
+		break;
+	case POWER_SUPPLY_PROP_QMAX0:
+		xmc_ops_get_gauge_qmax(chip->gauge_dev, &val->intval, 0);
+		break;
+	case POWER_SUPPLY_PROP_QMAX1:
+		xmc_ops_get_gauge_qmax(chip->gauge_dev, &val->intval, 1);
+		break;
+	case POWER_SUPPLY_PROP_TRUE_REM_Q:
+		xmc_ops_get_gauge_true_rem_q(chip->gauge_dev, &val->intval);
+		break;
+	case POWER_SUPPLY_PROP_INITIAL_Q:
+		xmc_ops_get_gauge_initial_q(chip->gauge_dev, &val->intval);
+		break;
+	case POWER_SUPPLY_PROP_TRUE_FULL_CHG_Q:
+		xmc_ops_get_gauge_true_full_chg_q(chip->gauge_dev, &val->intval);
+		break;
+	case POWER_SUPPLY_PROP_T_SIM:
+		xmc_ops_get_gauge_t_sim(chip->gauge_dev, &val->intval);
+		break;
+	case POWER_SUPPLY_PROP_CELL_GRID:
+		xmc_ops_get_gauge_cell_grid(chip->gauge_dev, &val->intval);
+		break;
+	case POWER_SUPPLY_PROP_CHIP_OK:
+		val->intval = chip->battery.chip_ok;
+		break;
+	case POWER_SUPPLY_PROP_RSOC:
+		xmc_ops_get_rsoc(chip->gauge_dev, &val->intval);
+		break;
+	case POWER_SUPPLY_PROP_CAPACITY_RAW:
+		val->intval = chip->battery.rm*10000/chip->battery.fcc;
 		break;
 	default:
 		return -EINVAL;
@@ -427,10 +681,29 @@ int xmc_sysfs_set_property(struct power_supply *psy, enum xmc_sysfs_prop prop, c
 	case POWER_SUPPLY_PROP_CONNECTOR_TEMP:
 		chip->usb_typec.fake_temp = val->intval;
 		break;
-	case POWER_SUPPLY_PROP_INPUT_SUSPEND:
+	case POWER_SUPPLY_PROP_INPUT_SUSPEND_USB:
 		chip->usb_typec.cmd_input_suspend = val->intval;
 		break;
+	case POWER_SUPPLY_PROP_MTBF_TEST:
+		chip->mtbf_test = val->intval;
+		break;
+
+	/* /sys/power_supply/battery */
+	case POWER_SUPPLY_PROP_INPUT_SUSPEND_BATTERY:
+		chip->usb_typec.cmd_input_suspend = val->intval;
+		break;
+	case POWER_SUPPLY_PROP_NIGHT_CHARGING:
+		chip->night_charging = val->intval;
+		break;
+	case POWER_SUPPLY_PROP_SMART_BATT:
+		chip->smart_fv_shift = val->intval;
+		break;
+
 	/* /sys/power_supply/bms */
+	case POWER_SUPPLY_PROP_SHUTDOWN_MODE:
+		if (val->intval == 1)
+			xmc_ops_set_gauge_shutdown_mode(chip->gauge_dev);
+		break;
 	default:
 		return -EINVAL;
 	}
@@ -489,10 +762,27 @@ static ssize_t xmc_sysfs_show(struct device *dev, struct device_attribute *attr,
 }
 
 static struct xmc_sysfs_info bms_sysfs_field_tbl[] = {
-	XMC_SYSFS_FIELD_RO(fastcharge_mode, POWER_SUPPLY_PROP_FASTCHARGE_MODE),
-	XMC_SYSFS_FIELD_RO(resistance_id, POWER_SUPPLY_PROP_RESISTANCE_ID),
-	XMC_SYSFS_FIELD_RO(soc_decimal, POWER_SUPPLY_PROP_SOC_DECIMAL),
-	XMC_SYSFS_FIELD_RO(soc_decimal_rate, POWER_SUPPLY_PROP_SOC_DECIMAL_RATE),
+	XMC_SYSFS_FIELD_RO(fastcharge_mode, POWER_SUPPLY_PROP_FASTCHARGE_MODE, false),
+	XMC_SYSFS_FIELD_RO(resistance_id, POWER_SUPPLY_PROP_RESISTANCE_ID, false),
+	XMC_SYSFS_FIELD_RO(soc_decimal, POWER_SUPPLY_PROP_SOC_DECIMAL, true),
+	XMC_SYSFS_FIELD_RO(soc_decimal_rate, POWER_SUPPLY_PROP_SOC_DECIMAL_RATE, true),
+	XMC_SYSFS_FIELD_RO(shutdown_delay, POWER_SUPPLY_PROP_SHUTDOWN_DELAY, true),
+	XMC_SYSFS_FIELD_RW(shutdown_mode, POWER_SUPPLY_PROP_SHUTDOWN_MODE, false),
+	XMC_SYSFS_FIELD_RO(soh, POWER_SUPPLY_PROP_SOH, false),
+	XMC_SYSFS_FIELD_RO(rm, POWER_SUPPLY_PROP_RM, false),
+	XMC_SYSFS_FIELD_RO(fcc, POWER_SUPPLY_PROP_FCC, false),
+	XMC_SYSFS_FIELD_RO(temp_max, POWER_SUPPLY_PROP_MAX_TEMP, false),
+	XMC_SYSFS_FIELD_RO(time_ot, POWER_SUPPLY_PROP_TIME_OT, false),
+	XMC_SYSFS_FIELD_RO(qmax0, POWER_SUPPLY_PROP_QMAX0, false),
+	XMC_SYSFS_FIELD_RO(qmax1, POWER_SUPPLY_PROP_QMAX1, false),
+	XMC_SYSFS_FIELD_RO(true_rem_q, POWER_SUPPLY_PROP_TRUE_REM_Q, false),
+	XMC_SYSFS_FIELD_RO(initial_q, POWER_SUPPLY_PROP_INITIAL_Q, false),
+	XMC_SYSFS_FIELD_RO(true_full_chg_q, POWER_SUPPLY_PROP_TRUE_FULL_CHG_Q, false),
+	XMC_SYSFS_FIELD_RO(t_sim, POWER_SUPPLY_PROP_T_SIM, false),
+	XMC_SYSFS_FIELD_RO(cell_grid, POWER_SUPPLY_PROP_CELL_GRID, false),
+	XMC_SYSFS_FIELD_RO(chip_ok, POWER_SUPPLY_PROP_CHIP_OK, false),
+	XMC_SYSFS_FIELD_RO(rsoc, POWER_SUPPLY_PROP_RSOC, false),
+	XMC_SYSFS_FIELD_RO(raw_soc, POWER_SUPPLY_PROP_CAPACITY_RAW, false),
 };
 
 static struct attribute * bms_sysfs_attrs[ARRAY_SIZE(bms_sysfs_field_tbl) + 1];
@@ -502,13 +792,17 @@ static const struct attribute_group bms_sysfs_attr_group = {
 };
 
 static struct xmc_sysfs_info usb_sysfs_field_tbl[] = {
-	XMC_SYSFS_FIELD_RO(real_type, POWER_SUPPLY_PROP_REAL_TYPE),
-	XMC_SYSFS_FIELD_RO(quick_charge_type, POWER_SUPPLY_PROP_QUICK_CHARGE_TYPE),
-	XMC_SYSFS_FIELD_RO(typec_mode, POWER_SUPPLY_PROP_TYPEC_MODE),
-	XMC_SYSFS_FIELD_RW(connector_temp, POWER_SUPPLY_PROP_CONNECTOR_TEMP),
-	XMC_SYSFS_FIELD_RO(typec_cc_orientation, POWER_SUPPLY_PROP_TYPEC_CC_ORIENTATION),
-	XMC_SYSFS_FIELD_RO(pd_authentication, POWER_SUPPLY_PROP_PD_AUTHENTICATION),
-	XMC_SYSFS_FIELD_RW(input_suspend, POWER_SUPPLY_PROP_INPUT_SUSPEND),
+	XMC_SYSFS_FIELD_RO(real_type, POWER_SUPPLY_PROP_REAL_TYPE, true),
+	XMC_SYSFS_FIELD_RO(quick_charge_type, POWER_SUPPLY_PROP_QUICK_CHARGE_TYPE, true),
+	XMC_SYSFS_FIELD_RO(typec_mode, POWER_SUPPLY_PROP_TYPEC_MODE, false),
+	XMC_SYSFS_FIELD_RW(connector_temp, POWER_SUPPLY_PROP_CONNECTOR_TEMP, false),
+	XMC_SYSFS_FIELD_RO(typec_cc_orientation, POWER_SUPPLY_PROP_TYPEC_CC_ORIENTATION, false),
+	XMC_SYSFS_FIELD_RO(pd_authentication, POWER_SUPPLY_PROP_PD_AUTHENTICATION, false),
+	XMC_SYSFS_FIELD_RO(apdo_max, POWER_SUPPLY_PROP_APDO_MAX, true),
+	XMC_SYSFS_FIELD_RO(power_max, POWER_SUPPLY_PROP_POWER_MAX, true),
+	XMC_SYSFS_FIELD_RO(ffc_enable, POWER_SUPPLY_PROP_FFC_ENABLE, false),
+	XMC_SYSFS_FIELD_RW(input_suspend, POWER_SUPPLY_PROP_INPUT_SUSPEND_USB, false),
+	XMC_SYSFS_FIELD_RW(mtbf_test, POWER_SUPPLY_PROP_MTBF_TEST, false),
 };
 
 static struct attribute * usb_sysfs_attrs[ARRAY_SIZE(usb_sysfs_field_tbl) + 1];
@@ -517,9 +811,32 @@ static const struct attribute_group usb_sysfs_attr_group = {
 	.attrs = usb_sysfs_attrs,
 };
 
+static struct xmc_sysfs_info battery_sysfs_field_tbl[] = {
+	XMC_SYSFS_FIELD_RW(input_suspend, POWER_SUPPLY_PROP_INPUT_SUSPEND_BATTERY, false),
+	XMC_SYSFS_FIELD_RW(night_charging, POWER_SUPPLY_PROP_NIGHT_CHARGING, false),
+	XMC_SYSFS_FIELD_RW(smart_batt, POWER_SUPPLY_PROP_SMART_BATT, false),
+};
+
+static struct attribute * battery_sysfs_attrs[ARRAY_SIZE(battery_sysfs_field_tbl) + 1];
+
+static const struct attribute_group battery_sysfs_attr_group = {
+	.attrs = battery_sysfs_attrs,
+};
+
 static int xmc_sysfs_create_group(struct charge_chip *chip)
 {
 	int i = 0, limit = 0, rc = 0;
+
+	limit = ARRAY_SIZE(battery_sysfs_field_tbl);
+	for (i = 0; i < limit; i++)
+		battery_sysfs_attrs[i] = &battery_sysfs_field_tbl[i].attr.attr;
+
+	battery_sysfs_attrs[limit] = NULL;
+	rc = sysfs_create_group(&chip->battery_psy->dev.kobj, &battery_sysfs_attr_group);
+	if (rc) {
+		xmc_err("[XMC_PROBE] failed to create battery_sysfs\n");
+		return rc;
+	}
 
 	limit = ARRAY_SIZE(usb_sysfs_field_tbl);
 	for (i = 0; i < limit; i++)
@@ -528,7 +845,7 @@ static int xmc_sysfs_create_group(struct charge_chip *chip)
 	usb_sysfs_attrs[limit] = NULL;
 	rc = sysfs_create_group(&chip->usb_psy->dev.kobj, &usb_sysfs_attr_group);
 	if (rc) {
-		xmc_err("failed to create usb_sysfs\n");
+		xmc_err("[XMC_PROBE] failed to create usb_sysfs\n");
 		return rc;
 	}
 
@@ -539,7 +856,7 @@ static int xmc_sysfs_create_group(struct charge_chip *chip)
 	bms_sysfs_attrs[limit] = NULL;
 	rc = sysfs_create_group(&chip->bms_psy->dev.kobj, &bms_sysfs_attr_group);
 	if (rc) {
-		xmc_err("failed to create bms_sysfs\n");
+		xmc_err("[XMC_PROBE] failed to create bms_sysfs\n");
 		return rc;
 	}
 
@@ -549,10 +866,10 @@ static int xmc_sysfs_create_group(struct charge_chip *chip)
 int xmc_sysfs_report_uevent(struct power_supply *psy)
 {
 	struct charge_chip *chip = NULL;
-	enum xmc_sysfs_prop i = 0, start_prop = 0, end_prop = 0;
+	struct xmc_sysfs_info *table = NULL;
 	union power_supply_propval pval = {0,};
 	char *envp[MAX_UEVENT_PROP_NUM] = { NULL };
-	int ret = 0;
+	int table_len = 0, report_num = 0, i = 0, ret = 0;
 
 	chip = power_supply_get_drvdata(psy);
 	if (!chip) {
@@ -561,36 +878,57 @@ int xmc_sysfs_report_uevent(struct power_supply *psy)
 	}
 
 	if (!strcmp(psy->desc->name, "usb")) {
-		start_prop = POWER_SUPPLY_PROP_USB_BEGIN + 1;
-		end_prop = POWER_SUPPLY_PROP_USB_END - 1;
+		table = kcalloc(ARRAY_SIZE(usb_sysfs_field_tbl), sizeof(*table), GFP_KERNEL);
+		if (!table) {
+			xmc_err("%s failed to calloc usb sysfs table\n");
+			goto out;
+		}
+		memcpy(table, usb_sysfs_field_tbl, sizeof(usb_sysfs_field_tbl));
+		table_len = ARRAY_SIZE(usb_sysfs_field_tbl);
 	} else if (!strcmp(psy->desc->name, "battery")) {
-		/* do something! */
+		table = kcalloc(ARRAY_SIZE(battery_sysfs_field_tbl), sizeof(*table), GFP_KERNEL);
+		if (!table) {
+			xmc_err("%s failed to calloc battery sysfs table\n");
+			goto out;
+		}
+		memcpy(table, battery_sysfs_field_tbl, sizeof(battery_sysfs_field_tbl));
+		table_len = ARRAY_SIZE(battery_sysfs_field_tbl);
 	} else if (!strcmp(psy->desc->name, "bms")) {
-		start_prop = POWER_SUPPLY_PROP_BMS_BEGIN + 1;
-		end_prop = POWER_SUPPLY_PROP_BMS_END - 1;
+		table = kcalloc(ARRAY_SIZE(bms_sysfs_field_tbl), sizeof(*table), GFP_KERNEL);
+		if (!table) {
+			xmc_err("%s failed to calloc bms sysfs table\n");
+			goto out;
+		}
+		memcpy(table, bms_sysfs_field_tbl, sizeof(bms_sysfs_field_tbl));
+		table_len = ARRAY_SIZE(bms_sysfs_field_tbl);
 	} else {
 		xmc_err("don't support report this uevent\n");
 		goto out;
 	}
 
-	if (end_prop - start_prop + 3 > MAX_UEVENT_PROP_NUM) {
-		xmc_err("uevent number over MAX range\n");
-		goto out;
-	}
-
 	envp[0] = kasprintf(GFP_KERNEL, "POWER_SUPPLY_NAME=%s", psy->desc->name);
-	for (i = start_prop; i <= end_prop; i++) {
-		xmc_sysfs_get_property(psy, i, &pval);
-		if (i == POWER_SUPPLY_PROP_REAL_TYPE || i == POWER_SUPPLY_PROP_TYPEC_MODE)
-			envp[i - start_prop + 1] = kasprintf(GFP_KERNEL, "%s=%s", xmc_sysfs_prop_name[i], pval.strval);
+
+	for (i = 0; i < table_len; i++) {
+		if (!table[i].report_uevent)
+			continue;
+		report_num++;
+		if (report_num > MAX_UEVENT_PROP_NUM - 2) {
+			xmc_err("uevent number over MAX range\n");
+			goto out;
+		}
+
+		xmc_sysfs_get_property(psy, table[i].prop, &pval);
+		if (table[i].prop == POWER_SUPPLY_PROP_REAL_TYPE || table[i].prop == POWER_SUPPLY_PROP_TYPEC_MODE)
+			envp[report_num] = kasprintf(GFP_KERNEL, "%s=%s", xmc_sysfs_prop_name[table[i].prop], pval.strval);
 		else
-			envp[i - start_prop + 1] = kasprintf(GFP_KERNEL, "%s=%d", xmc_sysfs_prop_name[i], pval.intval);
+			envp[report_num] = kasprintf(GFP_KERNEL, "%s=%d", xmc_sysfs_prop_name[table[i].prop], pval.intval);
 	}
 
-	envp[end_prop - start_prop + 2] = NULL;
+	envp[report_num + 1] = NULL;
 	ret = kobject_uevent_env(&chip->dev->kobj, KOBJ_CHANGE, envp);
 
 out:
+	kfree(table);
 	for (i = 0; i < MAX_UEVENT_PROP_NUM; i++)
 		kfree(envp[i]);
 

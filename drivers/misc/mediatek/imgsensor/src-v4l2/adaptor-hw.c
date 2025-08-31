@@ -291,18 +291,17 @@ int do_hw_power_on(struct adaptor_ctx *ctx)
 	for (i = 0; i < ctx->subdrv->pw_seq_cnt; i++) {
 		ent = &ctx->subdrv->pw_seq[i];
 		op = &ctx->hw_ops[ent->id];
-#ifdef __XIAOMI_CAMERA__
 		if ((ent->id == HW_ID_AFVDD) && ctx->is_reset == 1) {
 			dev_info(ctx->dev, "%s skip power on for AF\n", __func__);
 			continue;
 		}
-#endif
 		if (!op->set) {
 			dev_dbg(ctx->dev, "cannot set comp %d val %d\n",
 				ent->id, ent->val);
 			continue;
 		}
 		op->set(ctx, op->data, ent->val);
+		dev_err(ctx->dev, "[%s] op->data =%d, ent->val = %d", __func__,op->data,ent->val);
 		if (ent->delay)
 			mdelay(ent->delay);
 	}
@@ -355,19 +354,16 @@ int do_hw_power_off(struct adaptor_ctx *ctx)
 	for (i = ctx->subdrv->pw_seq_cnt - 1; i >= 0; i--) {
 		ent = &ctx->subdrv->pw_seq[i];
 		op = &ctx->hw_ops[ent->id];
-#ifdef __XIAOMI_CAMERA__
 		if ((ent->id == HW_ID_AFVDD) && ctx->is_reset == 1) {
 			dev_info(ctx->dev, "%s skip power off for AF\n", __func__);
 			continue;
 		}
-#endif
 		if (!op->unset)
 			continue;
 		op->unset(ctx, op->data, ent->val);
-#ifdef __XIAOMI_CAMERA__
+		dev_err(ctx->dev, "[%s] op->data =%d, ent->val = %d", __func__,op->data,ent->val);
 		if (ent->delay)
 			mdelay(ent->delay);
-#endif
 		//msleep(ent->delay);
 	}
 
@@ -530,15 +526,7 @@ int adaptor_hw_init(struct adaptor_ctx *ctx)
 		ctx->pinctrl = NULL;
 	}
 
-#ifdef __XIAOMI_CAMERA__
 	ctx->is_reset = 0;
-#if (defined(MATISSE_CAM) || defined(RUBENS_CAM))
-	/* get regmap for mt6319_7 */
-	if(mt6319_7_regmap == NULL) {
-		mt6319_7_regmap = pmic_get_regmap(ctx, "mt6319_7");
-	}
-#endif
-#endif
 
 	return 0;
 }
@@ -555,15 +543,11 @@ int adaptor_hw_sensor_reset(struct adaptor_ctx *ctx)
 		ctx->is_sensor_inited == 1 &&
 		ctx->power_refcnt > 0) {
 
-#ifdef __XIAOMI_CAMERA__
 		/* do not power on/off for AFVDD */
 		ctx->is_reset = 1;
-#endif
 		do_hw_power_off(ctx);
 		do_hw_power_on(ctx);
-#ifdef __XIAOMI_CAMERA__
 		ctx->is_reset = 0;
-#endif
 
 		return 0;
 	}

@@ -77,6 +77,15 @@ int charger_dev_cp_reset_check(struct charger_device *chg_dev)
 }
 EXPORT_SYMBOL(charger_dev_cp_reset_check);
 
+int charger_dev_cp_init_check(struct charger_device *chg_dev)
+{
+	if (chg_dev != NULL && chg_dev->ops != NULL && chg_dev->ops->cp_init_check)
+		return chg_dev->ops->cp_init_check(chg_dev);
+
+	return -EOPNOTSUPP;
+}
+EXPORT_SYMBOL(charger_dev_cp_init_check);
+
 int charger_dev_plug_in(struct charger_device *chg_dev)
 {
 	if (chg_dev != NULL && chg_dev->ops != NULL && chg_dev->ops->plug_in)
@@ -215,6 +224,16 @@ int charger_dev_get_ibat(struct charger_device *chg_dev, u32 *ibat)
 	return -EOPNOTSUPP;
 }
 EXPORT_SYMBOL(charger_dev_get_ibat);
+
+int charger_dev_get_charge_ic_stat(struct charger_device *chg_dev, u32 *stat)
+{
+	if (chg_dev != NULL && chg_dev->ops != NULL &&
+	    chg_dev->ops->get_charge_ic_stat)
+		return chg_dev->ops->get_charge_ic_stat(chg_dev, stat);
+
+	return -EOPNOTSUPP;
+}
+EXPORT_SYMBOL(charger_dev_get_charge_ic_stat);
 
 int charger_dev_get_temperature(struct charger_device *chg_dev, int *tchg_min,
 		int *tchg_max)

@@ -595,6 +595,9 @@ s32 mml_comp_clk_enable(struct mml_comp *comp)
 	return 0;
 }
 
+#define call_hw_op(_comp, op, ...) \
+	(_comp->hw_ops->op ? _comp->hw_ops->op(_comp, ##__VA_ARGS__) : 0)
+
 s32 mml_comp_clk_disable(struct mml_comp *comp)
 {
 	u32 i;
@@ -607,6 +610,9 @@ s32 mml_comp_clk_disable(struct mml_comp *comp)
 			__func__, comp->id, comp->name, comp->clk_cnt);
 		return -EINVAL;
 	}
+
+	/* clear bandwidth before disable if this component support dma */
+	call_hw_op(comp, qos_clear);
 
 	for (i = 0; i < ARRAY_SIZE(comp->clks); i++) {
 		if (IS_ERR(comp->clks[i]))
@@ -654,28 +660,31 @@ static u32 mml_calc_bw_racing(u32 datasize)
 void mml_comp_qos_set(struct mml_comp *comp, struct mml_task *task,
 	struct mml_comp_config *ccfg, u32 throughput, u32 tput_up)
 {
-	struct mml_pipe_cache *cache = &task->config->cache[ccfg->pipe];
-	u32 bandwidth, datasize;
+	struct mml_frame_config *cfg = task->config;
+	struct mml_pipe_cache *cache = &cfg->cache[ccfg->pipe];
+	u32 bandwidth, datasize, hrt_bw;
 	bool hrt;
 
 	datasize = comp->hw_ops->qos_datasize_get(task, ccfg);
-	if (task->config->info.mode == MML_MODE_RACING) {
+	if (cfg->info.mode == MML_MODE_RACING) {
 		hrt = true;
 		bandwidth = mml_calc_bw_racing(datasize);
 		if (unlikely(mml_racing_urgent))
 			bandwidth = U32_MAX;
+		hrt_bw = cfg->disp_hrt;
 	} else {
 		hrt = false;
 		bandwidth = mml_calc_bw(datasize, cache->max_pixel, throughput);
+		hrt_bw = 0;
 	}
 
 	/* store for debug log */
 	task->pipe[ccfg->pipe].bandwidth = max(bandwidth,
 		task->pipe[ccfg->pipe].bandwidth);
-	mtk_icc_set_bw(comp->icc_path, MBps_to_icc(bandwidth), 0);
+	mtk_icc_set_bw(comp->icc_path, MBps_to_icc(bandwidth), hrt_bw);
 
-	mml_msg_qos("%s comp %u %s qos bw %u by throughput %u pixel %u size %u%s",
-		__func__, comp->id, comp->name, bandwidth,
+	mml_msg_qos("%s comp %u %s qos bw %u(%u) by throughput %u pixel %u size %u%s",
+		__func__, comp->id, comp->name, bandwidth, hrt_bw / 1000,
 		throughput, cache->max_pixel, datasize,
 		hrt ? " hrt" : "");
 }
@@ -683,7 +692,7 @@ void mml_comp_qos_set(struct mml_comp *comp, struct mml_task *task,
 void mml_comp_qos_clear(struct mml_comp *comp)
 {
 	mtk_icc_set_bw(comp->icc_path, 0, 0);
-	mml_msg("%s comp %u %s qos bw clear", __func__, comp->id, comp->name);
+	mml_msg_qos("%s comp %u %s qos bw clear", __func__, comp->id, comp->name);
 }
 
 static const struct mml_comp_hw_ops mml_hw_ops = {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (c) 2019 MediaTek Inc.
-// Copyright (C) 2022 XiaoMi, Inc.
+
 #include <linux/delay.h>
 #include <linux/module.h>
 #include <linux/i2c.h>
@@ -266,7 +266,7 @@ static int ktd2687_torch_brt_ctrl(struct ktd2687_flash *flash,
 
 	br_bits = KTD2687_TORCH_BRT_uA_TO_REG(torch_cur_avg);
 
-	pr_info("%s avg_brt:%u brt_bit :%x", __func__, torch_cur_avg, br_bits);
+	pr_info("%s avg_brt:%u brt_bit :%x", __func__, torch_cur_avg ,br_bits);
 
 	rval = regmap_update_bits(flash->regmap,
 				  REG_LED0_TORCH_BR, 0x7f, br_bits);
@@ -289,7 +289,7 @@ static int ktd2687_flash_brt_ctrl(struct ktd2687_flash *flash,
 
 	br_bits = KTD2687_FLASH_BRT_uA_TO_REG(flash_cur_avg);
 
-	pr_info("%s avg_brt:%u brt_bit :%x", __func__, flash_cur_avg, br_bits);
+	pr_info("%s avg_brt:%u brt_bit :%x", __func__, flash_cur_avg ,br_bits);
 
 	rval = regmap_update_bits(flash->regmap,
 				  REG_LED0_FLASH_BR, 0x7f, br_bits);
@@ -649,9 +649,7 @@ static int ktd2687_init(struct ktd2687_flash *flash)
 	if (rval < 0)
 		return rval;
 
-#ifdef XAGA_CAM
 	use_count = 1;
-#endif
 
 	/* reset faults */
 	rval = regmap_read(flash->regmap, REG_FLAG1, &reg_val);
@@ -663,10 +661,7 @@ static int ktd2687_uninit(struct ktd2687_flash *flash)
 {
 	ktd2687_pinctrl_set(flash,
 			KTD2687_PINCTRL_PIN_HWEN, KTD2687_PINCTRL_PINSTATE_LOW);
-
-#ifdef XAGA_CAM
 	use_count = 0;
-#endif
 
 	return 0;
 }
@@ -750,17 +745,10 @@ static int ktd2687_set_driver(int set)
 	/* set chip and usage count */
 	//mutex_lock(&ktd2687_mutex);
 	if (set) {
-#ifdef XAGA_CAM
 		if (!use_count) {
 			ret = ktd2687_init(ktd2687_flash_data);
 			pr_debug("Set driver: %d\n", use_count);
 		}
-#else
-		if (!use_count)
-			ret = ktd2687_init(ktd2687_flash_data);
-		use_count++;
-		pr_debug("Set driver: %d\n", use_count);
-#endif
 	} else {
 		use_count--;
 		if (!use_count)

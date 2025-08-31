@@ -39,6 +39,7 @@ bool __attribute__ ((weak)) mp2762_init(void) { return true; }
 bool __attribute__ ((weak)) bq27z561_init(struct charge_chip *chip) { return true; }
 bool __attribute__ ((weak)) sc8551_init(void) { return true; }
 bool __attribute__ ((weak)) sc8561_init(void) { return true; }
+bool __attribute__ ((weak)) ln8410_init(void) { return true; }
 bool __attribute__ ((weak)) ln8000_init(void) { return true; }
 bool __attribute__ ((weak)) bq25980_init(void) { return true; }
 bool __attribute__ ((weak)) xmusb350_init(void) { return true; }
@@ -266,6 +267,9 @@ static bool xmc_parse_charge_dt(struct charge_chip *chip)
 		}
 	}
 
+	if (chip->feature_list.sic_support)
+		chip->sic_current = chip->thermal_limit[THERMAL_TABLE_NUM - 1][0];
+
 	for (i = 0; i < THERMAL_LEVEL_NUM; i++)
 		xmc_info("[XMC_PROBE] [thermal_limit][%d %d %d %d %d %d]\n", chip->thermal_limit[0][i], chip->thermal_limit[1][i], chip->thermal_limit[2][i],
 			chip->thermal_limit[3][i], chip->thermal_limit[4][i], chip->thermal_limit[5][i]);
@@ -305,8 +309,7 @@ static bool xmc_parse_charge_dt(struct charge_chip *chip)
 	ret |= of_property_read_u32(step_jeita_node, "step_forward_hyst", &chip->step_forward_hyst);
 	ret |= of_property_read_u32(step_jeita_node, "jeita_fallback_hyst", &chip->jeita_fallback_hyst);
 	ret |= of_property_read_u32(step_jeita_node, "jeita_forward_hyst", &chip->jeita_forward_hyst);
-	ret |= of_property_read_u32(step_jeita_node, "jeita_forward_hyst", &chip->cycle_count_threshold);
-	ret |= of_property_read_u32(step_jeita_node, "jeita_forward_hyst", &chip->jeita_hysteresis);
+	ret |= of_property_read_u32(step_jeita_node, "jeita_hysteresis", &chip->jeita_hysteresis);
 
 	if (!xmc_parse_step_chg_config(chip, true)) {
 		xmc_err("[XMC_PROBE] failed to parse step_chg_config\n");
@@ -340,7 +343,6 @@ static bool xmc_parse_basic_dt(struct charge_chip *chip)
 	ret |= of_property_read_u32(chip_list_node, "battery_type", &chip->chip_list.battery_type);
 	ret |= of_property_read_u32(chip_list_node, "gauge_chip", &chip->chip_list.gauge_chip);
 	ret |= of_property_read_u32(chip_list_node, "buck_boost", &chip->chip_list.buck_boost);
-	ret |= of_property_read_u32(chip_list_node, "cp_div_type", &chip->chip_list.cp_div_type);
 	ret |= of_property_read_u32(chip_list_node, "cp_com_type", &chip->chip_list.cp_com_type);
 	ret |= of_property_read_u32(chip_list_node, "third_cp", &chip->chip_list.third_cp);
 	ret |= of_property_read_u32(chip_list_node, "bc12_qc_chip", &chip->chip_list.bc12_qc_chip);
@@ -350,8 +352,8 @@ static bool xmc_parse_basic_dt(struct charge_chip *chip)
 		return false;
 	}
 
-	xmc_info("[XMC_PROBE] [chip_list][BATTERY GAUGE BBC CP_DIV_TYPE CP_COM_TYPE THIRD_CP PROTOCOL_CHIP [CP_CHIP]] = [%d, %d, %d, %d, %d, %d, [%d %d %d]]\n",
-		chip->chip_list.battery_type, chip->chip_list.gauge_chip, chip->chip_list.buck_boost, chip->chip_list.cp_div_type, chip->chip_list.cp_com_type,
+	xmc_info("[XMC_PROBE] [chip_list][BATTERY GAUGE BBC CP_COM_TYPE THIRD_CP PROTOCOL_CHIP [CP_CHIP]] = [%d, %d, %d, %d, %d, %d, [%d %d %d]]\n",
+		chip->chip_list.battery_type, chip->chip_list.gauge_chip, chip->chip_list.buck_boost, chip->chip_list.cp_com_type,
 		chip->chip_list.third_cp, chip->chip_list.bc12_qc_chip, chip->chip_list.charge_pump[0], chip->chip_list.charge_pump[1], chip->chip_list.charge_pump[2]);
 
 	chip->feature_list.pdm_support = of_property_read_bool(feature_list_node, "pdm_support");
@@ -363,12 +365,11 @@ static bool xmc_parse_basic_dt(struct charge_chip *chip)
 	xmc_info("[XMC_PROBE] [feature_list][PDM QCM QC3 BYPASS SIC] = [%d, %d, %d, %d]\n", chip->feature_list.pdm_support, chip->feature_list.qcm_support,
 		chip->feature_list.qc3_support, chip->feature_list.bypass_support, chip->feature_list.sic_support);
 
-	ret |= of_property_read_u32(basic_charge_node, "main_monitor_delay", &chip->main_monitor_delay);
-	ret |= of_property_read_u32(basic_charge_node, "second_monitor_delay", &chip->second_monitor_delay);
 	ret |= of_property_read_u32(basic_charge_node, "fv", &chip->fv);
-	ret |= of_property_read_u32(basic_charge_node, "ffc_fv", &chip->ffc_fv);
-	ret |= of_property_read_u32(basic_charge_node, "bbc_max_fcc", &chip->bbc_max_fcc);
-	ret |= of_property_read_u32(basic_charge_node, "bbc_max_icl", &chip->bbc_max_icl);
+	ret |= of_property_read_u32(basic_charge_node, "fv_ffc", &chip->fv_ffc);
+	ret |= of_property_read_u32(basic_charge_node, "iterm", &chip->iterm);
+	ret |= of_property_read_u32(basic_charge_node, "iterm_ffc_cool", &chip->iterm_ffc_cool);
+	ret |= of_property_read_u32(basic_charge_node, "iterm_ffc_warm", &chip->iterm_ffc_warm);
 	ret |= of_property_read_u32_array(basic_charge_node, "fcc", (u32 *)(chip->fcc), VOTE_CHARGER_TYPE_NUM);
 	ret |= of_property_read_u32_array(basic_charge_node, "icl", (u32 *)(chip->icl), VOTE_CHARGER_TYPE_NUM);
 	ret |= of_property_read_u32_array(basic_charge_node, "mivr", (u32 *)(chip->mivr), VOTE_CHARGER_TYPE_NUM);
@@ -430,6 +431,8 @@ static int xmc_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, chip);
 	mutex_init(&chip->charger_type_lock);
 	chip->usb_typec.burn_wakelock = wakeup_source_register(NULL, "typec_burn_wakelock");
+	chip->usb_typec.otg_wakelock = wakeup_source_register(NULL, "otg_wakelock");
+	chip->usb_typec.attach_wakelock = wakeup_source_register(NULL, "charger_attach_wakelock");
 
 	if (!xmc_parse_basic_dt(chip)) {
 		xmc_err("[XMC_PROBE] failed to parse basic DTSI\n");
@@ -458,6 +461,9 @@ static int xmc_probe(struct platform_device *pdev)
 
 	if (xmc_find_chip(chip->chip_list.charge_pump, MAX_CP_DRIVER_NUM, CPC_SC8561))
 		sc8561_init();
+
+	if (xmc_find_chip(chip->chip_list.charge_pump, MAX_CP_DRIVER_NUM, CPC_LN8410))
+		ln8410_init();
 
 	if (xmc_find_chip(chip->chip_list.charge_pump, MAX_CP_DRIVER_NUM, CPC_LN8000))
 		ln8000_init();
@@ -520,6 +526,7 @@ static int xmc_probe(struct platform_device *pdev)
 	}
 
 	schedule_delayed_work(&chip->main_monitor_work, 0);
+	chip->init_done = true;
 	xmc_info("[XMC_PROBE] XMC probe success\n");
 
 	return 0;
@@ -530,6 +537,7 @@ static int xmc_suspend(struct device *dev)
 	struct charge_chip *chip = dev_get_drvdata(dev);
 
 	chip->resume = false;
+	xmc_info("[XMC_POWER] suspend\n");
 
 	return 0;
 }
@@ -539,6 +547,7 @@ static int xmc_resume(struct device *dev)
 	struct charge_chip *chip = dev_get_drvdata(dev);
 
 	chip->resume = true;
+	xmc_info("[XMC_POWER] resume\n");
 
 	return 0;
 }

@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2010 - 2018 Novatek, Inc.
- * Copyright (C) 2022 XiaoMi, Inc.
  *
  * $Revision: 32206 $
  * $Date: 2018-08-10 19:23:04 +0800 (週五, 10 八月 2018) $
@@ -44,9 +43,9 @@
 #define NVT_DUMP_PARTITION_PATH		"/data/local/tmp"
 
 static ktime_t start, end;
-const struct firmware *fw_entry;
-static size_t fw_need_write_size;
-static uint8_t *fwbuf;
+const struct firmware *fw_entry = NULL;
+static size_t fw_need_write_size = 0;
+static uint8_t *fwbuf = NULL;
 
 struct nvt_ts_bin_map {
 	char name[12];
@@ -104,7 +103,7 @@ static int32_t nvt_download_init(void)
 
 	if (fwbuf == NULL) {
 		fwbuf = (uint8_t *)kzalloc((NVT_TRANSFER_LEN + 1 + DUMMY_BYTES), GFP_KERNEL);
-		if (fwbuf == NULL) {
+		if(fwbuf == NULL) {
 			NVT_ERR("kzalloc for fwbuf failed!\n");
 			return -ENOMEM;
 		}
@@ -130,7 +129,7 @@ static uint32_t CheckSum(const u8 *data, size_t len)
 		checksum += data[i];
 
 	checksum += len;
-	checksum = ~checksum + 1;
+	checksum = ~checksum +1;
 
 	return checksum;
 }
@@ -147,7 +146,7 @@ Description:
 return:
 	n.a.
 *******************************************************/
-static uint32_t partition;
+static uint32_t partition = 0;
 static uint8_t ilm_dlm_num = 2;
 static int32_t nvt_bin_header_parser(const u8 *fwdata, size_t fwsize)
 {
@@ -162,7 +161,7 @@ static int32_t nvt_bin_header_parser(const u8 *fwdata, size_t fwsize)
 	end = fwdata[0] + (fwdata[1] << 8) + (fwdata[2] << 16) + (fwdata[3] << 24);
 	pos = 0x30;	/* info section start at 0x30 offset */
 	while (pos < end) {
-		info_sec_num++;
+		info_sec_num ++;
 		pos += 0x10; /* each header info is 16 bytes */
 	}
 
@@ -184,7 +183,7 @@ static int32_t nvt_bin_header_parser(const u8 *fwdata, size_t fwsize)
 
 	/* allocated memory for header info */
 	bin_map = (struct nvt_ts_bin_map *)kzalloc((partition+1) * sizeof(struct nvt_ts_bin_map), GFP_KERNEL);
-	if (bin_map == NULL) {
+	if(bin_map == NULL) {
 		NVT_ERR("kzalloc for bin_map failed!\n");
 		return -ENOMEM;
 	}
@@ -252,7 +251,7 @@ static int32_t nvt_bin_header_parser(const u8 *fwdata, size_t fwsize)
 		 */
 		if (list >= (ilm_dlm_num + info_sec_num)) {
 			/* overlay info located at DLM (list = 1) start addr */
-			pos = bin_map[1].BIN_addr + (0x10 * (list - ilm_dlm_num - info_sec_num));
+			pos = bin_map[1].BIN_addr + (0x10 * (list- ilm_dlm_num - info_sec_num));
 
 			bin_map[list].SRAM_addr = byte_to_word(&fwdata[pos]);
 			bin_map[list].size = byte_to_word(&fwdata[pos+4]);
@@ -268,7 +267,7 @@ static int32_t nvt_bin_header_parser(const u8 *fwdata, size_t fwsize)
 					return -EINVAL;
 				}
 			}
-			sprintf(bin_map[list].name, "Overlay-%d", (list - ilm_dlm_num - info_sec_num));
+			sprintf(bin_map[list].name, "Overlay-%d", (list- ilm_dlm_num - info_sec_num));
 		}
 
 		/* BIN size error detect */
@@ -360,7 +359,7 @@ invalid:
 
 request_fail:
 		retry++;
-		if (unlikely(retry > 2)) {
+		if(unlikely(retry > 2)) {
 			NVT_ERR("error, retry=%d\n", retry);
 			break;
 		}
@@ -377,7 +376,7 @@ Description:
 return:
 	n.a.
 *******************************************************/
-loff_t file_offset;
+loff_t file_offset = 0;
 static int32_t nvt_read_ram_and_save_file(uint32_t addr, uint16_t len, char *name)
 {
 	char file[256] = "";
@@ -390,7 +389,7 @@ static int32_t nvt_read_ram_and_save_file(uint32_t addr, uint16_t len, char *nam
 	NVT_LOG("Dump [%s] from 0x%08X to 0x%08X\n", file, addr, addr+len);
 
 	fbufp = (uint8_t *)kzalloc(len+1, GFP_KERNEL);
-	if (fbufp == NULL) {
+	if(fbufp == NULL) {
 		NVT_ERR("kzalloc for fbufp failed!\n");
 		ret = -ENOMEM;
 		goto alloc_buf_fail;
@@ -481,7 +480,7 @@ static int32_t nvt_dump_partition(void)
 		if (!size)
 			continue;
 		else
-			size = size + 1;
+			size = size +1;
 
 		/* write data to SRAM */
 		if (size % NVT_DUMP_PARTITION_LEN)
@@ -602,7 +601,7 @@ static int32_t nvt_write_firmware(const u8 *fwdata, size_t fwsize)
 		if (!size)
 			continue;
 		else
-			size = size + 1;
+			size = size +1;
 
 		/* write data to SRAM */
 		ret = nvt_write_sram(fwdata, SRAM_addr, size, BIN_addr);
@@ -653,7 +652,7 @@ static int32_t nvt_check_fw_checksum(void)
 		fw_checksum = byte_to_word(&fwbuf[1+list*4]);
 
 		/* ignore reserved partition (Reserved Partition size is zero) */
-		if (!bin_map[list].size)
+		if(!bin_map[list].size)
 			continue;
 
 		if (bin_map[list].crc != fw_checksum) {
@@ -901,7 +900,7 @@ nvt_write_disp_off_retry:
 		usleep_range(1000, 1000);
 		retry++;
 
-		if (unlikely(retry > 40)) {
+		if(unlikely(retry > 40)) {
 			NVT_ERR("Wait F2C_EN = 0 failed! retry = %d\n", retry);
 
 			for (i = 0; i < 3; i++) {
@@ -1041,7 +1040,7 @@ static int32_t nvt_download_firmware_hw_crc(void)
 
 fail:
 		retry++;
-		if (unlikely(retry > 2)) {
+		if(unlikely(retry > 2)) {
 			NVT_ERR("error, retry=%d\n", retry);
 			nvt_read_bld_hw_crc();
 #if NVT_TOUCH_ESD_DISP_RECOVERY
@@ -1131,7 +1130,7 @@ static int32_t nvt_download_firmware(void)
 
 fail:
 		retry++;
-		if (unlikely(retry > 2)) {
+		if(unlikely(retry > 2)) {
 			NVT_ERR("error, retry=%d\n", retry);
 			break;
 		}

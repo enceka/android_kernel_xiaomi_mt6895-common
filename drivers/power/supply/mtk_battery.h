@@ -115,6 +115,7 @@ enum battery_property {
 	BAT_PROP_NIGHT_CHARGING,
 	BAT_PROP_INPUT_SUSPEND,
 	BAT_PROP_SMART_BATT,
+	BAT_PROP_SHIPMODE,
 };
 
 struct battery_data {
@@ -924,6 +925,7 @@ struct mtk_battery {
 	bool disableGM30;
 	bool ntc_disable_nafg;
 	bool cmd_disable_nafg;
+        bool shipmode_flag;
 
 	/*battery plug in out*/
 	int chr_type;
@@ -1080,6 +1082,7 @@ struct mtk_battery {
 	int log_level;
 	int thermal_level;
 	int diff_fv_val;
+        bool night_charging;
 };
 
 struct mtk_battery_sysfs_field_info {

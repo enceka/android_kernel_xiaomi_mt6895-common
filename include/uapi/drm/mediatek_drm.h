@@ -486,6 +486,12 @@ struct DISP_DITHER_PARAM {
 #define DRM_MTK_GET_PQ_CAPS 0x54
 #define DRM_MTK_SET_PQ_CAPS 0x55
 
+/* CWB */
+#define DRM_MTK_SET_CWB_ROI 0x56
+#define DRM_MTK_SET_CWB_STATUS 0x57
+#define DRM_MTK_GET_CWB_IMAGE 0x58
+
+
 /* C3D */
 #define DISP_C3D_1DLUT_SIZE 32
 
@@ -1123,6 +1129,20 @@ struct mtk_drm_pq_caps_info {
 			DRM_MTK_GET_PQ_CAPS, struct mtk_drm_pq_caps_info)
 #define DRM_IOCTL_MTK_SET_PQ_CAPS    DRM_IOWR(DRM_COMMAND_BASE + \
 			DRM_MTK_SET_PQ_CAPS, struct mtk_drm_pq_caps_info)
+
+struct mtk_cwb_roi {
+	int x;
+	int y;
+	int width;
+	int height;
+};
+
+#define DRM_IOCTL_MTK_SET_CWB_ROI DRM_IOWR(DRM_COMMAND_BASE + \
+			DRM_MTK_SET_CWB_ROI, struct mtk_cwb_roi)
+#define DRM_IOCTL_MTK_SET_CWB_STATUS  DRM_IOWR(DRM_COMMAND_BASE + \
+			DRM_MTK_SET_CWB_STATUS, unsigned int)
+#define DRM_IOCTL_MTK_GET_CWB_IMAGE DRM_IOWR(DRM_COMMAND_BASE + \
+		    DRM_MTK_GET_CWB_IMAGE, uint8_t)
 
 /* AAL IOCTL */
 #define AAL_HIST_BIN            33	/* [0..32] */

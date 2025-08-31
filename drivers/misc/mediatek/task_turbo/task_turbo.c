@@ -25,7 +25,6 @@
 #include <trace/hooks/topology.h>
 #include <trace/hooks/debug.h>
 #include <trace/hooks/wqlockup.h>
-#include <trace/hooks/sysrqcrash.h>
 #include <trace/hooks/cgroup.h>
 #include <trace/hooks/sys.h>
 
@@ -39,6 +38,10 @@
 #include "linux/trace_clock.h"
 #include <uapi/linux/android/binderfs.h>
 #include <uapi/linux/android/binder.h>
+
+#ifdef CONFIG_METIS_MTK
+#include "../../../../drivers/mihw/include/mi_module.h"
+#endif
 // END
 
 LIST_HEAD(hmp_domains);
@@ -549,6 +552,26 @@ static inline unsigned long _task_util_est(struct task_struct *p)
 	return max(ue.ewma, (ue.enqueued & ~UTIL_AVG_UNCHANGED));
 }
 
+// MIUI ADD: START
+#ifdef CONFIG_METIS_MTK
+mi_vip_task_hook mi_vip_task_func = NULL;
+
+void register_mi_vip_task_hook(mi_vip_task_hook f)
+{
+	pr_info("%s now\n", __FUNCTION__);
+	mi_vip_task_func = f;
+}
+EXPORT_SYMBOL_GPL(register_mi_vip_task_hook);
+
+void unregister_mi_vip_task_hook(void)
+{
+	pr_info("%s now\n", __FUNCTION__);
+	mi_vip_task_func = NULL;
+}
+EXPORT_SYMBOL_GPL(unregister_mi_vip_task_hook);
+#endif
+// END
+
 int find_best_turbo_cpu(struct task_struct *p)
 {
 	struct hmp_domain *domain;
@@ -565,6 +588,16 @@ int find_best_turbo_cpu(struct task_struct *p)
 		tmp_domain[domain_cnt] = domain;
 		domain_cnt++;
 	}
+
+// MIUI ADD: START
+#ifdef CONFIG_METIS_MTK
+	if (domain_cnt > 2 && mi_vip_task_func && mi_vip_task_func(p)) {
+		domain = tmp_domain[0];
+		tmp_domain[0] = tmp_domain[1];
+		tmp_domain[1] = domain;
+	}
+#endif
+// END
 
 	for (i = 0; i < domain_cnt; i++) {
 		domain = tmp_domain[i];
@@ -609,6 +642,15 @@ out:
 int select_turbo_cpu(struct task_struct *p)
 {
 	int target_cpu = -1;
+
+// MIUI ADD: START
+#ifdef CONFIG_METIS_MTK
+	if (mi_vip_task_func && mi_vip_task_func(p)) {
+		target_cpu = find_best_turbo_cpu(p);
+		return target_cpu;
+	}
+#endif
+// END
 
 	if (!is_turbo_task(p))
 		return -1;

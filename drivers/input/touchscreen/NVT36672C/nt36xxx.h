@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2010 - 2018 Novatek, Inc.
- * Copyright (C) 2022 XiaoMi, Inc.
  *
  * $Revision: 32206 $
  * $Date: 2018-08-10 19:23:04 +0800 (週五, 10 八月 2018) $
@@ -16,8 +15,8 @@
  * more details.
  *
  */
-#ifndef _LINUX_NVT_TOUCH_H
-#define	_LINUX_NVT_TOUCH_H
+#ifndef 	_LINUX_NVT_TOUCH_H
+#define		_LINUX_NVT_TOUCH_H
 
 #include <linux/delay.h>
 #include <linux/input.h>
@@ -41,7 +40,7 @@
 #include <linux/platform_data/spi-mt65xx.h>
 #endif
 #define XDATA_SECTOR_SIZE               256
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 6, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0)
 #define HAVE_PROC_OPS
 #endif
 extern void tp_enable_doubleclick(bool state);
@@ -123,7 +122,7 @@ extern bool is_tp_doubleclick_enable(void);
 #define NVT_TOUCH_ESD_DISP_RECOVERY				1
 
 #define EXPERT_ARRAY_SIZE					3
-#define SUPPORT_GAME_VERSION2							1
+#define SUPPORT_GAME_VERSION2					1
 struct nvt_config_info {
 	u8 tp_vendor;
 	u8 tp_color;

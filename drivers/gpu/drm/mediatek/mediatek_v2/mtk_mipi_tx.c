@@ -128,7 +128,6 @@
 #define MIPITX_LANE_CON_MT6983 (0x0004UL)
 #define MIPITX_VOLTAGE_SEL_MT6983 (0x0008UL)
 #define FLD_RG_DSI_PRD_REF_SEL (0x3f << 0)
-#define FLD_RG_DSI_V2I_REF_SEL (0xf << 10)
 #define MIPITX_PRESERVED_MT6983 (0x000CUL)
 
 #define RG_DSI_PLL_SDM_PCW_CHG_MT6983 BIT(2)
@@ -3548,7 +3547,7 @@ static const struct mtk_mipitx_data mt6983_mipitx_data = {
 	.d0_sw_ctl_en = MIPITX_D0_SW_CTL_EN_MT6983,
 	.d1_sw_ctl_en = MIPITX_D1_SW_CTL_EN_MT6983,
 	.d2_sw_ctl_en = MIPITX_D2_SW_CTL_EN_MT6983,
-	.d3_sw_ctl_en = MIPITX_D2_SW_CTL_EN_MT6983,
+	.d3_sw_ctl_en = MIPITX_D3_SW_CTL_EN_MT6983,
 	.d0_sw_lptx_pre_oe = MIPITX_D0_SW_LPTX_PRE_OE_MT6983,
 	.d0c_sw_lptx_pre_oe = MIPITX_D0C_SW_LPTX_PRE_OE_MT6983,
 	.d1_sw_lptx_pre_oe = MIPITX_D1_SW_LPTX_PRE_OE_MT6983,
@@ -3575,7 +3574,7 @@ static const struct mtk_mipitx_data mt6895_mipitx_data = {
 	.d0_sw_ctl_en = MIPITX_D0_SW_CTL_EN_MT6983,
 	.d1_sw_ctl_en = MIPITX_D1_SW_CTL_EN_MT6983,
 	.d2_sw_ctl_en = MIPITX_D2_SW_CTL_EN_MT6983,
-	.d3_sw_ctl_en = MIPITX_D2_SW_CTL_EN_MT6983,
+	.d3_sw_ctl_en = MIPITX_D3_SW_CTL_EN_MT6983,
 	.d0_sw_lptx_pre_oe = MIPITX_D0_SW_LPTX_PRE_OE_MT6983,
 	.d0c_sw_lptx_pre_oe = MIPITX_D0C_SW_LPTX_PRE_OE_MT6983,
 	.d1_sw_lptx_pre_oe = MIPITX_D1_SW_LPTX_PRE_OE_MT6983,
@@ -3603,7 +3602,7 @@ static const struct mtk_mipitx_data mt6983_mipitx_cphy_data = {
 	.d0_sw_ctl_en = MIPITX_D0_SW_CTL_EN_MT6983,
 	.d1_sw_ctl_en = MIPITX_D1_SW_CTL_EN_MT6983,
 	.d2_sw_ctl_en = MIPITX_D2_SW_CTL_EN_MT6983,
-	.d3_sw_ctl_en = MIPITX_D2_SW_CTL_EN_MT6983,
+	.d3_sw_ctl_en = MIPITX_D3_SW_CTL_EN_MT6983,
 	.d0_sw_lptx_pre_oe = MIPITX_D0_SW_LPTX_PRE_OE_MT6983,
 	.d0c_sw_lptx_pre_oe = MIPITX_D0C_SW_LPTX_PRE_OE_MT6983,
 	.d1_sw_lptx_pre_oe = MIPITX_D1_SW_LPTX_PRE_OE_MT6983,
@@ -3630,7 +3629,7 @@ static const struct mtk_mipitx_data mt6895_mipitx_cphy_data = {
 	.d0_sw_ctl_en = MIPITX_D0_SW_CTL_EN_MT6983,
 	.d1_sw_ctl_en = MIPITX_D1_SW_CTL_EN_MT6983,
 	.d2_sw_ctl_en = MIPITX_D2_SW_CTL_EN_MT6983,
-	.d3_sw_ctl_en = MIPITX_D2_SW_CTL_EN_MT6983,
+	.d3_sw_ctl_en = MIPITX_D3_SW_CTL_EN_MT6983,
 	.d0_sw_lptx_pre_oe = MIPITX_D0_SW_LPTX_PRE_OE_MT6983,
 	.d0c_sw_lptx_pre_oe = MIPITX_D0C_SW_LPTX_PRE_OE_MT6983,
 	.d1_sw_lptx_pre_oe = MIPITX_D1_SW_LPTX_PRE_OE_MT6983,

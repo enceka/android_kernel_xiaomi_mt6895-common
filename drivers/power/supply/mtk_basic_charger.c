@@ -179,13 +179,24 @@ static bool select_charging_current_limit(struct mtk_charger *info,
 	}
 #endif
 
-	if (info->real_type == XMUSB350_TYPE_FLOAT && (info->pd_type != MTK_PD_CONNECT_PE_READY_SNK_PD30) && (info->pd_type != MTK_PD_CONNECT_PE_READY_SNK_APDO) && !info->usb350_dev) {
-		if (info->usb_type == POWER_SUPPLY_USB_TYPE_SDP && info->chr_type == POWER_SUPPLY_TYPE_USB)
-			info->real_type = XMUSB350_TYPE_SDP;
-		else if (info->usb_type == POWER_SUPPLY_USB_TYPE_CDP)
-			info->real_type = XMUSB350_TYPE_CDP;
-		else if (info->usb_type == POWER_SUPPLY_USB_TYPE_DCP && info->chr_type == POWER_SUPPLY_TYPE_USB_DCP)
-			info->real_type = XMUSB350_TYPE_DCP;
+	if (info->product_name == MATISSE) {//L11
+		if (info->real_type == XMUSB350_TYPE_FLOAT && !info->pd_type && !info->usb350_dev) {
+			if (info->usb_type == POWER_SUPPLY_USB_TYPE_SDP)
+				info->real_type = XMUSB350_TYPE_SDP;
+			else if (info->usb_type == POWER_SUPPLY_USB_TYPE_CDP)
+				info->real_type = XMUSB350_TYPE_CDP;
+			else if (info->usb_type == POWER_SUPPLY_USB_TYPE_DCP && info->chr_type == POWER_SUPPLY_TYPE_USB_DCP)
+				info->real_type = XMUSB350_TYPE_DCP;
+		}
+	} else {
+		if (info->real_type == XMUSB350_TYPE_FLOAT && (info->pd_type != MTK_PD_CONNECT_PE_READY_SNK_PD30) && (info->pd_type != MTK_PD_CONNECT_PE_READY_SNK_APDO) && !info->usb350_dev) {
+			if (info->usb_type == POWER_SUPPLY_USB_TYPE_SDP && info->chr_type == POWER_SUPPLY_TYPE_USB)
+				info->real_type = XMUSB350_TYPE_SDP;
+			else if (info->usb_type == POWER_SUPPLY_USB_TYPE_CDP)
+				info->real_type = XMUSB350_TYPE_CDP;
+			else if (info->usb_type == POWER_SUPPLY_USB_TYPE_DCP && info->chr_type == POWER_SUPPLY_TYPE_USB_DCP)
+				info->real_type = XMUSB350_TYPE_DCP;
+		}
 	}
 
 	if (info->real_type == XMUSB350_TYPE_FLOAT) {
@@ -221,9 +232,10 @@ retry:
 
 		if (info->switch_pd_wa == -1)
 			 pdata->input_current_limit = 1400000;
+		else if(get_vbus(info) < 6000)
+ 			pdata->input_current_limit = 3000000;
 		else
-			 pdata->input_current_limit = info->data.pd2_input_current;
-
+			pdata->input_current_limit = info->data.pd2_input_current;
 	        pdata->charging_current_limit = info->thermal_current * 1000;
 	        chr_err("pd use vote current charging=%d\n", info->thermal_current);
 	        is_basic = true;
@@ -257,13 +269,18 @@ retry:
 		if (!info->usb350_dev)
 			info->real_type = XMUSB350_TYPE_CDP;
 	} else if (info->chr_type == POWER_SUPPLY_TYPE_USB_DCP) {
-		chr_err("DCP set input current 1500mA charging\n");
+		chr_err("DCP set input current 1600mA charging\n");
 		pdata->input_current_limit =
 			info->data.ac_charger_input_current;
 		pdata->charging_current_limit =
 			info->data.ac_charger_current;
-		if (!info->usb350_dev && (info->pd_type == MTK_PD_CONNECT_TYPEC_ONLY_SNK || info->usb_type == POWER_SUPPLY_USB_TYPE_DCP))
-			info->real_type = XMUSB350_TYPE_DCP;
+		if (info->product_name == MATISSE) {//L11
+			if (!info->usb350_dev && info->pd_type == MTK_PD_CONNECT_TYPEC_ONLY_SNK)
+				info->real_type = XMUSB350_TYPE_DCP;
+		} else {
+			if (!info->usb350_dev && (info->pd_type == MTK_PD_CONNECT_TYPEC_ONLY_SNK || info->usb_type == POWER_SUPPLY_USB_TYPE_DCP))
+				info->real_type = XMUSB350_TYPE_DCP;
+		}
 		if (info->config == DUAL_CHARGERS_IN_SERIES) {
 			pdata2->input_current_limit =
 				pdata->input_current_limit;
@@ -276,7 +293,7 @@ retry:
 		type_temp = info->real_type;
 		if (!info->usb350_dev)
 			info->real_type = XMUSB350_TYPE_HVCHG;
-		pdata->input_current_limit =  1200000;
+		pdata->input_current_limit =  1600000;
 		pdata->charging_current_limit = 3000000;
 		is_basic = true;
 		if (type_temp != info->real_type)
@@ -571,7 +588,13 @@ static int do_algorithm(struct mtk_charger *info)
 	info->is_chg_done = chg_done;
 
 	if (is_basic == true) {
-		vote(info->icl_votable, ICL_VOTER, true, pdata->input_current_limit / 1000);
+		chr_err("ICL_VOTER set aicr=%d , not final set\n",pdata->input_current_limit);
+		if((pdata->input_current_limit / 1000) < 1000){
+			vote(info->icl_votable, ICL_VOTER, true, 1000);
+		}else{
+			vote(info->icl_votable, ICL_VOTER, true, pdata->input_current_limit / 1000);
+		}
+
 		charger_dev_set_charging_current(info->chg1_dev,
 			pdata->charging_current_limit);
 
@@ -608,8 +631,10 @@ static int do_algorithm(struct mtk_charger *info)
 	else {
 		alg = get_chg_alg_by_name("pe5");
 		ret = chg_alg_is_algo_ready(alg);
-		if (!(ret == ALG_READY || ret == ALG_RUNNING) && (info->night_charge_enable == false))
-			charger_dev_enable(info->chg1_dev, !info->charge_full);
+		if (!(ret == ALG_READY || ret == ALG_RUNNING) && (info->night_charge_enable == false)) {
+			if(info->charge_full == 1)
+          			charger_dev_enable(info->chg1_dev, !info->charge_full);
+		}
 	}
 
 	if (info->chg1_dev != NULL)

@@ -1450,7 +1450,6 @@ void pd_dpm_dfp_inform_uvdm(struct pd_port *pd_port, bool ack)
 				pd_port, svid_data, ack);
 	}
 
-    DPM_INFO("pd_dpm_dfp_inform_uvdm\r\n");
 	tcpci_notify_uvdm(tcpc, ack);
 	pd_notify_tcp_vdm_event_2nd_result(pd_port,
 		ack ? TCP_DPM_RET_VDM_ACK : TCP_DPM_RET_VDM_NAK);

@@ -2,7 +2,7 @@
 /*
  * Copyright (c) 2019 MediaTek Inc.
  */
-//#define DEBUG
+
 #include <linux/kthread.h>
 #include <sched/sched.h>
 #include <linux/unistd.h>
@@ -28,7 +28,6 @@
 #include "mtk_drm_arr.h"
 #include "uboost.h"
 #include "gbe_common.h"
-
 
 #define CREATE_TRACE_POINTS
 
@@ -318,7 +317,6 @@ void fpsgo_notify_qudeq(int qudeq,
 
 	FPSGO_LOGI("[FPSGO_CTRL] qudeq %d-%d, id %llu pid %d\n",
 		qudeq, startend, id, pid);
-
 	if (!fpsgo_is_enable())
 		return;
 
@@ -355,7 +353,6 @@ void fpsgo_notify_connect(int pid,
 	FPSGO_LOGI(
 		"[FPSGO_CTRL] connect pid %d, id %llu, API %d\n",
 		pid, id, connectedAPI);
-
 	vpPush =
 		(struct FPSGO_NOTIFIER_PUSH_TAG *)
 		fpsgo_alloc_atomic(sizeof(struct FPSGO_NOTIFIER_PUSH_TAG));
@@ -824,7 +821,6 @@ fail_reg_cpu_frequency_entry:
 #if IS_ENABLED(CONFIG_DRM_MEDIATEK)
 	drm_register_fps_chg_callback(dfrc_fps_limit_cb);
 #endif
-
 
 	return 0;
 }

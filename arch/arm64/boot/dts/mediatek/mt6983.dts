@@ -2638,6 +2638,8 @@
 		reg = <0 0x15001000 0 0x1000>;
 		mediatek,smi = <&smi_img_subcommon0>;
 		mediatek,larb-id = <9>;
+		mediatek,comm-port-id = <0>;
+		larb-clamp-ctrl-enable;
 		power-domains = <&scpsys MT6983_POWER_DOMAIN_ISP_MAIN>;
 		clocks = <&imgsys_main_clk CLK_IMGSYS_MAIN_LARB9>,
 				 <&imgsys_main_clk CLK_IMGSYS_MAIN_LARB9>;
@@ -2650,6 +2652,8 @@
 		reg = <0 0x15004000 0 0x1000>;
 		mediatek,smi = <&smi_img_subcommon1>;
 		mediatek,larb-id = <18>;
+		mediatek,comm-port-id = <3>;
+		larb-clamp-ctrl-enable;
 		power-domains = <&scpsys MT6983_POWER_DOMAIN_ISP_MAIN>;
 		clocks = <&imgsys_main_clk CLK_IMGSYS_MAIN_ADL_LARB>,
 				 <&imgsys_main_clk CLK_IMGSYS_MAIN_ADL_LARB>;
@@ -2668,6 +2672,8 @@
 		reg = <0 0x15120000 0 0x1000>;
 		mediatek,smi = <&smi_img_subcommon0>;
 		mediatek,larb-id = <10>;
+		mediatek,comm-port-id = <1>;
+		larb-clamp-ctrl-enable;
 		power-domains = <&scpsys MT6983_POWER_DOMAIN_ISP_DIP1>;
 		clocks = <&dip_top_dip1_clk CLK_DIP_TOP_DIP1_DIP_TOP>,
 				 <&dip_top_dip1_clk CLK_DIP_TOP_DIP1_LARB10>;
@@ -2686,6 +2692,8 @@
 		reg = <0 0x15140000 0 0x1000>;
 		mediatek,smi = <&smi_img_subcommon1>;
 		mediatek,larb-id = <15>;
+		mediatek,comm-port-id = <1>;
+		larb-clamp-ctrl-enable;
 		power-domains = <&scpsys MT6983_POWER_DOMAIN_ISP_DIP1>;
 		clocks = <&dip_nr_dip1_clk CLK_DIP_NR_DIP1_DIP_NR>,
 				 <&dip_nr_dip1_clk CLK_DIP_NR_DIP1_LARB15>;
@@ -2704,6 +2712,8 @@
 		reg = <0 0x15230000 0 0x1000>;
 		mediatek,smi = <&smi_img_subcommon0>;
 		mediatek,larb-id = <11>;
+		mediatek,comm-port-id = <2>;
+		larb-clamp-ctrl-enable;
 		power-domains = <&scpsys MT6983_POWER_DOMAIN_ISP_DIP1>;
 		clocks = <&wpe1_dip1_clk CLK_WPE1_DIP1_WPE>,
 				 <&wpe1_dip1_clk CLK_WPE1_DIP1_LARB11>;
@@ -2740,6 +2750,8 @@
 		reg = <0 0x15530000 0 0x1000>;
 		mediatek,smi = <&smi_img_subcommon1>;
 		mediatek,larb-id = <22>;
+		mediatek,comm-port-id = <2>;
+		larb-clamp-ctrl-enable;
 		power-domains = <&scpsys MT6983_POWER_DOMAIN_ISP_DIP1>;
 		clocks = <&wpe2_dip1_clk CLK_WPE2_DIP1_WPE>,
 				 <&wpe2_dip1_clk CLK_WPE2_DIP1_LARB11>;
@@ -2758,6 +2770,8 @@
 		reg = <0 0x15630000 0 0x1000>;
 		mediatek,smi = <&smi_img_subcommon0>;
 		mediatek,larb-id = <23>;
+		mediatek,comm-port-id = <3>;
+		larb-clamp-ctrl-enable;
 		power-domains = <&scpsys MT6983_POWER_DOMAIN_ISP_DIP1>;
 		clocks = <&wpe3_dip1_clk CLK_WPE3_DIP1_WPE>,
 				 <&wpe3_dip1_clk CLK_WPE3_DIP1_LARB11>;
@@ -6233,10 +6247,10 @@
 		usb_charger_current = <500000>;
 		ac_charger_current = <2050000>;
 		ac_charger_input_current = <3200000>;
-		non_std_ac_charger_current = <500000>;
+		non_std_ac_charger_current = <1500000>;
 		charging_host_charger_current = <1500000>;
 		ta_ac_charger_current = <3000000>;
-		pd_charger_current = <500000>;
+		pd_charger_current = <1500000>;
 		pre_charger_current = <250000>;
 
 		/* battery temperature protection */
@@ -9910,8 +9924,8 @@
 		compatible = "mediatek,mt6983-vcodec-enc";
 		mediatek,platform = "platform:mt6983";
 		mediatek,ipm = <2>;
-		reg = <0 0x17020000 0 0x2000>,
-			<0 0x17820000 0 0x2000>;
+		reg = <0 0x17020000 0 0x6000>,
+			<0 0x17820000 0 0x6000>;
 		reg-names = "VENC_SYS",
 			"VENC_C1_SYS";
 		iommus = <&mdp_iommu M4U_PORT_L8_VENC_RCPU_MDP>,
@@ -11046,6 +11060,7 @@
 
 	bt: bt@18000000 {
 		compatible = "mediatek,bt";
+		flavor_bin = "_t";
 			/* conn_infra_rgu */
 		reg = <0 0x18000000 0 0x1000>,
 			/* conn_infra_cfg */
@@ -13824,6 +13839,11 @@ cpuqos_mode,dnth0,dnth1,upth0,upth1";
 		mediatek,ccu_rproc = <&ccu_rproc>;
 	};
 
+	camera_imgsys_ccu {
+		compatible = "mediatek,camera_imgsys_ccu";
+		mediatek,ccu_rproc = <&ccu_rproc>;
+	};
+
 	ccu_rproc: ccu_rproc@1b080000 {
 		compatible = "mediatek,ccu_rproc";
 		reg = <0 0x1b080000 0 0x9000>;
@@ -14688,7 +14708,7 @@ cpuqos_mode,dnth0,dnth1,upth0,upth1";
 			ieoc = <150>;
 			wdt = <40000>;
 			/* wdt_en; */
-			te_en;
+			/* te_en; */
 			vbus_ov = <14500>;
 			vrec = <100>;
 			ircmp_r = <0>;
@@ -15297,6 +15317,12 @@ cpuqos_mode,dnth0,dnth1,upth0,upth1";
 };
 
 /* AUDIO GPIO standardization end */
+
+// load wifi firmware
+&wifi {
+	flavor_bin = "_t";
+};
+
 /* cust.dtsi part */
 #include "mediatek/trusty.dtsi"
 #include "mediatek/mt6983-disable-unused.dtsi"

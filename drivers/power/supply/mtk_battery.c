@@ -32,7 +32,6 @@
 #include "mtk_battery_table.h"
 #include "mtk_charger.h"
 
-
 struct tag_bootmode {
 	u32 size;
 	u32 tag;
@@ -539,6 +538,7 @@ static void mtk_battery_external_power_changed(struct power_supply *psy)
 	union power_supply_propval prop_type;
 	int cur_chr_type = 0, old_vbat0 = 0;
 	bool charge_full = false;
+        bool warm_term = false;
 	struct power_supply *chg_psy = NULL;
 	struct power_supply *dv2_chg_psy = NULL;
 	struct power_supply *usb_psy = NULL;
@@ -561,6 +561,11 @@ static void mtk_battery_external_power_changed(struct power_supply *psy)
 			charge_full = false;
 		else
 			charge_full = temp;
+                ret = usb_get_property(USB_PROP_WARM_TERM, &temp);
+                if (ret)
+			warm_term = false;
+		else
+			warm_term = temp;
 	}
 
 	if (IS_ERR_OR_NULL(chg_psy)) {
@@ -617,10 +622,11 @@ static void mtk_battery_external_power_changed(struct power_supply *psy)
 
 		if (charge_full) {
 			bm_err("POWER_SUPPLY_STATUS_FULL, EOC\n");
-			if (bs_data->bat_health == POWER_SUPPLY_HEALTH_WARM || bs_data->bat_health == POWER_SUPPLY_HEALTH_HOT)
-				bs_data->bat_status = POWER_SUPPLY_STATUS_CHARGING;
-			else
+			if (bs_data->bat_health == POWER_SUPPLY_HEALTH_WARM || bs_data->bat_health == POWER_SUPPLY_HEALTH_HOT || warm_term) {
+        		bs_data->bat_status = POWER_SUPPLY_STATUS_FULL;
+			} else {
 				bs_data->bat_status = POWER_SUPPLY_STATUS_FULL;
+			}
 			gauge_get_int_property(GAUGE_PROP_BAT_EOC);
 			bm_err("GAUGE_PROP_BAT_EOC done\n");
 			notify_fg_chr_full(gm);
@@ -2326,6 +2332,7 @@ static int night_charging_set(struct mtk_battery *gm,
 	int val)
 {
 	night_charging_set_flag(!!val);
+        gm->night_charging = !!val;
 	return 0;
 }
 
@@ -2564,6 +2571,26 @@ static int reset_set(struct mtk_battery *gm,
 	return 0;
 }
 
+static int shipmode_count_reset_get(struct mtk_battery *gm,
+	struct mtk_battery_sysfs_field_info *attr,
+	int *val)
+{
+	*val = gm->shipmode_flag;
+	return 0;
+}
+
+static int shipmode_count_reset_set(struct mtk_battery *gm,
+	struct mtk_battery_sysfs_field_info *attr,
+	int val)
+{
+	gm->shipmode_flag = val;
+        bm_debug("[%s] shipmode_flag = %d\n",
+		__func__,
+		gm->shipmode_flag);
+
+	return 0;
+}
+
 static ssize_t bat_sysfs_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
 {
@@ -2625,6 +2652,7 @@ static struct mtk_battery_sysfs_field_info battery_sysfs_field_tbl[] = {
 	BAT_SYSFS_FIELD_RW(night_charging, BAT_PROP_NIGHT_CHARGING),
 	BAT_SYSFS_FIELD_RW(input_suspend, BAT_PROP_INPUT_SUSPEND),
 	BAT_SYSFS_FIELD_RW(smart_batt, BAT_PROP_SMART_BATT),
+	BAT_SYSFS_FIELD_RW(shipmode_count_reset, BAT_PROP_SHIPMODE),
 };
 
 int battery_get_property(enum battery_property bp,
@@ -3598,6 +3626,7 @@ int battery_init(struct platform_device *pdev)
 	gm->in_sleep = false;
 	gm->thermal_level = 0;
 	mutex_init(&gm->fg_update_lock);
+	gm->shipmode_flag = false;
 
 	init_waitqueue_head(&gm->wait_que);
 

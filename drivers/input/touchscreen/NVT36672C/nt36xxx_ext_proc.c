@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2010 - 2018 Novatek, Inc.
- * Copyright (C) 2022 XiaoMi, Inc.
  *
  * $Revision: 52752 $
  * $Date: 2019-11-06 18:05:46 +0800 (週三, 06 十一月 2019) $
@@ -50,9 +49,9 @@ static struct proc_dir_entry *NVT_proc_xiaomi_lockdown_info_entry;
 
 
 /* Xiaomi Config Info */
-static uint8_t nvt_xiaomi_conf_info_fw_ver;
-static uint8_t nvt_xiaomi_conf_info_fae_id;
-static uint64_t nvt_xiaomi_conf_info_reservation;
+static uint8_t nvt_xiaomi_conf_info_fw_ver = 0;
+static uint8_t nvt_xiaomi_conf_info_fae_id = 0;
+static uint64_t nvt_xiaomi_conf_info_reservation = 0;
 
 /*******************************************************
 Description:
@@ -90,7 +89,7 @@ return:
 *******************************************************/
 uint8_t nvt_get_fw_pipe(void)
 {
-	uint8_t buf[8] = {0};
+	uint8_t buf[8]= {0};
 
 	/* ---set xdata index to EVENT BUF ADDR--- */
 	nvt_set_page(ts->mmap->EVENT_BUF_ADDR | EVENT_MAP_HANDSHAKING_or_SUB_CMD_BYTE);
@@ -320,10 +319,10 @@ static int32_t nvt_fw_version_open(struct inode *inode, struct file *file)
 
 #ifdef HAVE_PROC_OPS
 static const struct proc_ops nvt_fw_version_fops = {
-	.proc_open = nvt_fw_version_open,
-	.proc_read = seq_read,
+	.proc_open =  nvt_fw_version_open,
+	.proc_read =  seq_read, 
 	.proc_lseek = seq_lseek,
-	.proc_release = seq_release,
+	.proc_release = seq_release, 
 };
 #else
 static const struct file_operations nvt_fw_version_fops = {
@@ -383,11 +382,11 @@ static int32_t nvt_baseline_open(struct inode *inode, struct file *file)
 }
 
 #ifdef HAVE_PROC_OPS
-static const  struct proc_ops  nvt_baseline_fops = {
-	.proc_open =  nvt_baseline_open,
-	.proc_read =  seq_read,
-	.proc_lseek = seq_lseek,
-	.proc_release = seq_release,
+static const  struct proc_ops  nvt_baseline_fops= {
+        .proc_open =  nvt_baseline_open,
+        .proc_read =  seq_read,
+        .proc_lseek = seq_lseek,
+        .proc_release = seq_release,
 };
 #else
 static const struct file_operations nvt_baseline_fops = {
@@ -450,11 +449,11 @@ static int32_t nvt_raw_open(struct inode *inode, struct file *file)
 }
 
 #ifdef HAVE_PROC_OPS
-static const struct proc_ops  nvt_raw_fops = {
-	.proc_open =  nvt_raw_open,
-	.proc_read =  seq_read,
-	.proc_lseek = seq_lseek,
-	.proc_release = seq_release,
+static const struct proc_ops  nvt_raw_fops= {
+        .proc_open =  nvt_raw_open,
+        .proc_read =  seq_read,
+        .proc_lseek = seq_lseek,
+        .proc_release = seq_release,
 };
 #else
 static const struct file_operations nvt_raw_fops = {
@@ -515,14 +514,14 @@ static int32_t nvt_diff_open(struct inode *inode, struct file *file)
 
 	return seq_open(file, &nvt_seq_ops);
 }
-#ifdef HAVE_PROC_OPS
-static const  struct proc_ops nvt_diff_fops = {
-	.proc_open =  nvt_diff_open,
-	.proc_read =  seq_read,
-	.proc_lseek = seq_lseek,
-	.proc_release = seq_release,
-};
-#else
+#ifdef HAVE_PROC_OPS                                                            
+static const  struct proc_ops  nvt_diff_fops= {                                   
+        .proc_open =  nvt_diff_open,                                              
+        .proc_read =  seq_read,                                                  
+        .proc_lseek = seq_lseek,                                                 
+        .proc_release = seq_release,                                             
+};                                                                              
+#else  
 static const struct file_operations nvt_diff_fops = {
 	.owner = THIS_MODULE,
 	.open = nvt_diff_open,
@@ -573,11 +572,11 @@ static int32_t nvt_xiaomi_config_info_open(struct inode *inode, struct file *fil
 }
 
 #ifdef HAVE_PROC_OPS
-static const struct proc_ops  nvt_xiaomi_config_info_fops = {
-	.proc_open =  nvt_xiaomi_config_info_open,
-	.proc_read =  seq_read,
-	.proc_lseek = seq_lseek,
-	.proc_release = seq_release,
+static const struct proc_ops  nvt_xiaomi_config_info_fops= {
+        .proc_open =  nvt_xiaomi_config_info_open,
+        .proc_read =  seq_read,
+        .proc_lseek = seq_lseek,
+        .proc_release = seq_release,
 };
 #else
 static const struct file_operations nvt_xiaomi_config_info_fops = {
@@ -598,17 +597,19 @@ static int nvt_xiaomi_lockdown_info_show(struct seq_file *m, void *v)
 	return 0;
 }
 
+
+
 static int32_t nvt_xiaomi_lockdown_info_open(struct inode *inode, struct file *file)
 {
 	return single_open(file, nvt_xiaomi_lockdown_info_show, NULL);
 }
 
 #ifdef HAVE_PROC_OPS
-static const struct proc_ops  nvt_xiaomi_lockdown_info_fops = {
-	.proc_open =  nvt_xiaomi_lockdown_info_open,
-	.proc_read =  seq_read,
-	.proc_lseek = seq_lseek,
-	.proc_release = seq_release,
+static const struct proc_ops  nvt_xiaomi_lockdown_info_fops= {
+        .proc_open =  nvt_xiaomi_lockdown_info_open,
+        .proc_read =  seq_read,
+        .proc_lseek = seq_lseek,
+        .proc_release = seq_release,
 };
 #else
 static const struct file_operations nvt_xiaomi_lockdown_info_fops = {
@@ -669,7 +670,7 @@ return:
 *******************************************************/
 int32_t nvt_extra_proc_init(void)
 {
-	NVT_proc_fw_version_entry = proc_create(NVT_FW_VERSION, 0444, NULL, &nvt_fw_version_fops);
+	NVT_proc_fw_version_entry = proc_create(NVT_FW_VERSION, 0444, NULL,&nvt_fw_version_fops);
 	if (NVT_proc_fw_version_entry == NULL) {
 		NVT_ERR("create proc/%s Failed!\n", NVT_FW_VERSION);
 		return -ENOMEM;
@@ -677,7 +678,7 @@ int32_t nvt_extra_proc_init(void)
 		NVT_LOG("create proc/%s Succeeded!\n", NVT_FW_VERSION);
 	}
 
-	NVT_proc_baseline_entry = proc_create(NVT_BASELINE, 0444, NULL, &nvt_baseline_fops);
+	NVT_proc_baseline_entry = proc_create(NVT_BASELINE, 0444, NULL,&nvt_baseline_fops);
 	if (NVT_proc_baseline_entry == NULL) {
 		NVT_ERR("create proc/%s Failed!\n", NVT_BASELINE);
 		return -ENOMEM;
@@ -685,7 +686,7 @@ int32_t nvt_extra_proc_init(void)
 		NVT_LOG("create proc/%s Succeeded!\n", NVT_BASELINE);
 	}
 
-	NVT_proc_raw_entry = proc_create(NVT_RAW, 0444, NULL, &nvt_raw_fops);
+	NVT_proc_raw_entry = proc_create(NVT_RAW, 0444, NULL,&nvt_raw_fops);
 	if (NVT_proc_raw_entry == NULL) {
 		NVT_ERR("create proc/%s Failed!\n", NVT_RAW);
 		return -ENOMEM;
@@ -693,7 +694,7 @@ int32_t nvt_extra_proc_init(void)
 		NVT_LOG("create proc/%s Succeeded!\n", NVT_RAW);
 	}
 
-	NVT_proc_diff_entry = proc_create(NVT_DIFF, 0444, NULL, &nvt_diff_fops);
+	NVT_proc_diff_entry = proc_create(NVT_DIFF, 0444, NULL,&nvt_diff_fops);
 	if (NVT_proc_diff_entry == NULL) {
 		NVT_ERR("create proc/%s Failed!\n", NVT_DIFF);
 		return -ENOMEM;

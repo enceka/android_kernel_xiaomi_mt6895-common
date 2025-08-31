@@ -16,11 +16,13 @@
 #include "../../../../kernel/irq/internals.h"
 #include <uapi/drm/mi_disp.h>
 
+#include "mi_dsi_panel.h"
 #include "mi_disp_feature.h"
 #include "mtk_panel_ext.h"
 #include "mi_disp_print.h"
 #include "mi_panel_ext.h"
 #include "mtk_drm_ddp_comp.h"
+#include "mi_disp_lhbm.h"
 
 //static struct LCM_param_read_write lcm_param_read_write = {0};
 struct LCM_mipi_read_write lcm_mipi_read_write = {0};
@@ -31,6 +33,7 @@ struct mi_disp_notifier g_notify_data;
 #define DEFAULT_MAX_BRIGHTNESS_CLONE 8191
 #define DEFAULT_MAX_BRIGHTNESS  2047
 #define MAX_CMDLINE_PARAM_LEN 64
+#define PANEL_GIR_OFF_DELAY 120
 
 static char lockdown_info[64] = {0};
 extern void mipi_dsi_dcs_write_gce2(struct mtk_dsi *dsi, struct cmdq_pkt *dummy,
@@ -350,6 +353,42 @@ ssize_t mi_dsi_panel_enable_gir(struct mtk_dsi *dsi, char *buf)
 	return 0;
 }
 
+static void panel_gir_off_control(struct mtk_dsi *dsi)
+{
+	struct mtk_ddp_comp *comp =  NULL;
+	struct mtk_panel_ext *panel_ext = NULL;
+	if (!dsi) {
+		DISP_ERROR("invalid params\n");
+		return;
+	}
+
+	comp = &dsi->ddp_comp;
+
+	if (!comp) {
+		pr_info("%s comp nullptr", __func__);
+		return;
+	}
+	panel_ext = mtk_dsi_get_panel_ext(comp);
+	if (!(panel_ext && panel_ext->funcs && panel_ext->funcs->panel_set_gir_off)) {
+		pr_info("%s panel_set_gir_off func not defined", __func__);
+		return;
+	} else {
+		panel_ext->funcs->panel_set_gir_off(dsi->panel);
+	}
+
+	return;
+}
+
+void panel_gir_off_delayed_work(struct work_struct* work)
+{
+	struct mtk_dsi* dsi = container_of(work, struct mtk_dsi, gir_off_delayed_work.work);
+	if (!dsi) {
+		DISP_ERROR("invalid params\n");
+		return;
+	}
+	panel_gir_off_control(dsi);
+}
+
 ssize_t mi_dsi_panel_disable_gir(struct mtk_dsi *dsi, char *buf)
 {
 	struct mtk_ddp_comp *comp =  NULL;
@@ -595,11 +634,11 @@ ssize_t  mi_dsi_panel_read_mipi_reg(char *buf)
 
 	if (lcm_mipi_read_write.read_enable) {
 		for (i = 0; i < lcm_mipi_read_write.read_count; i++) {
-			if (i ==  lcm_mipi_read_write.read_count - 1) {
-				count += snprintf(buf + count, PAGE_SIZE - count, "0x%02x\n",
+			if (i == lcm_mipi_read_write.read_count - 1) {
+				count += snprintf(buf + count, PAGE_SIZE - count, "0x%02X\n",
 				     lcm_mipi_read_write.read_buffer[i]);
 			} else {
-				count += snprintf(buf + count, PAGE_SIZE - count, "0x%02x ",
+				count += snprintf(buf + count, PAGE_SIZE - count, "0x%02X,",
 				     lcm_mipi_read_write.read_buffer[i]);
 			}
 		}
@@ -856,7 +895,6 @@ static int dsi_panel_get_lockdown_from_cmdline(unsigned char *plockdowninfo)
 			pr_err("No panel is Connected !\n");
 			ret = -1;
 		}
-
 		pr_info("lockdown info from cmdline = 0x%02hhx,0x%02hhx,0x%02hhx,0x%02hhx,0x%02hhx,"
 			"0x%02hhx,0x%02hhx,0x%02hhx",
 			plockdowninfo[0], plockdowninfo[1], plockdowninfo[2], plockdowninfo[3],
@@ -998,8 +1036,14 @@ ssize_t  led_i2c_reg_write(struct mtk_dsi *dsi, char *buf, unsigned long  count)
 		memset(lcm_led_i2c_read_write.buffer, 0, sizeof(lcm_led_i2c_read_write.buffer));
 		lcm_led_i2c_read_write.buffer[0] = (unsigned char)register_addr;
 		if (panel_ext->funcs->led_i2c_reg_op)
+#if IS_ENABLED(CONFIG_DRM_PANEL_L16S_36_02_0A_DSC_VDO)
+			retval = panel_ext->funcs->led_i2c_reg_op(lcm_led_i2c_read_write.buffer,
+							LM36273_REG_READ, lcm_led_i2c_read_write.read_count);
+#else
 			retval = panel_ext->funcs->led_i2c_reg_op(lcm_led_i2c_read_write.buffer,
 							KTZ8863A_REG_READ, lcm_led_i2c_read_write.read_count);
+#endif
+
 	} else {
 		if (count < 12)
 			return retval;
@@ -1012,7 +1056,11 @@ ssize_t  led_i2c_reg_write(struct mtk_dsi *dsi, char *buf, unsigned long  count)
 		lcm_led_i2c_read_write.buffer[1] = (unsigned char)string_to_hex(pbuf);
 
 		if (panel_ext->funcs->led_i2c_reg_op)
+#if IS_ENABLED(CONFIG_DRM_PANEL_L16S_36_02_0A_DSC_VDO)
+			retval = panel_ext->funcs->led_i2c_reg_op(lcm_led_i2c_read_write.buffer, LM36273_REG_WRITE, 0);
+#else
 			retval = panel_ext->funcs->led_i2c_reg_op(lcm_led_i2c_read_write.buffer, KTZ8863A_REG_WRITE, 0);
+#endif
 	}
 
 	return retval;
@@ -1083,7 +1131,36 @@ int mi_dsi_panel_get_wp_info(struct mtk_dsi *dsi, char *buf, size_t size)
 	comp = &dsi->ddp_comp;
 	panel_ext = mtk_dsi_get_panel_ext(comp);
 	if (panel_ext && panel_ext->funcs && panel_ext->funcs->get_wp_info) {
-		count = panel_ext->funcs->get_wp_info(dsi->panel, buf, size);
+		if (mtk_drm_lcm_is_connect())
+			count = panel_ext->funcs->get_wp_info(dsi->panel, buf, size);
+		else {
+			DISP_ERROR("panel is not connetced\n");
+			count = panel_ext->funcs->get_wp_info(NULL, buf, size);
+		}
+	}
+
+err:
+	pr_info("%s: -\n", __func__);
+	return count;
+}
+
+int mi_dsi_panel_get_grayscale_info(struct mtk_dsi *dsi, char *buf, size_t size)
+{
+	struct mtk_ddp_comp *comp =  NULL;
+	struct mtk_panel_ext *panel_ext = NULL;
+	int count = 0;
+
+	pr_info("%s: +\n", __func__);
+
+	if (!dsi) {
+		DISP_ERROR("invalid params\n");
+		goto err;
+	}
+
+	comp = &dsi->ddp_comp;
+	panel_ext = mtk_dsi_get_panel_ext(comp);
+	if (panel_ext && panel_ext->funcs && panel_ext->funcs->get_grayscale_info) {
+		count = panel_ext->funcs->get_grayscale_info(dsi->panel, buf, size);
 	}
 
 err:
@@ -1134,6 +1211,29 @@ int mi_dsi_panel_get_max_brightness_clone(struct mtk_dsi *dsi,
 		return -1;
 	} else {
 		return panel_ext->funcs->get_panel_max_brightness_clone(dsi->panel, max_brightness_clone);
+	}
+}
+
+int mi_dsi_panel_get_factory_max_brightness(struct mtk_dsi *dsi,
+			u32 *max_brightness_clone)
+{
+	struct mtk_ddp_comp *comp =  NULL;
+	struct mtk_panel_ext *panel_ext = NULL;
+
+	if (!dsi) {
+		DISP_ERROR("invalid params\n");
+		return -EINVAL;
+	}
+
+	pr_info("%s +\n", __func__);
+	comp = &dsi->ddp_comp;
+	panel_ext = mtk_dsi_get_panel_ext(comp);
+
+	if (!(panel_ext && panel_ext->funcs && panel_ext->funcs->get_panel_factory_max_brightness)) {
+		pr_info("%s get_panel_max_brightness_clone func not defined", __func__);
+		return -1;
+	} else {
+		return panel_ext->funcs->get_panel_factory_max_brightness(dsi->panel, max_brightness_clone);
 	}
 }
 
@@ -1267,7 +1367,7 @@ int mi_dsi_panel_set_disp_param(struct mtk_dsi *dsi, struct disp_feature_ctl *ct
 		return 0;
 	}
 
-	if (!dsi_panel_initialized(dsi)) {
+	if (!dsi_panel_initialized(dsi) && (ctl->feature_id != DISP_FEATURE_SENSOR_LUX)) {
 		DISP_ERROR("Panel not initialized!\n");
 		return 0;
 	}
@@ -1294,8 +1394,10 @@ int mi_dsi_panel_set_disp_param(struct mtk_dsi *dsi, struct disp_feature_ctl *ct
 		if (panel_ext->funcs->normal_hbm_control) {
 			if (ctl->feature_val == FEATURE_ON) {
 				panel_ext->funcs->normal_hbm_control(dsi->panel, 1);
+				dsi->mi_cfg.normal_hbm_flag = true;
 			} else {
 				panel_ext->funcs->normal_hbm_control(dsi->panel, 0);
+				dsi->mi_cfg.normal_hbm_flag = false;
 			}
 		}
 		break;
@@ -1312,7 +1414,7 @@ int mi_dsi_panel_set_disp_param(struct mtk_dsi *dsi, struct disp_feature_ctl *ct
 	case DISP_FEATURE_LOCAL_HBM:
 		mi_cfg->feature_val[DISP_FEATURE_LOCAL_HBM] = ctl->feature_val;
 		if (panel_ext->funcs->set_lhbm_fod)
-			panel_ext->funcs->set_lhbm_fod(dsi->panel, ctl->feature_val);
+			panel_ext->funcs->set_lhbm_fod(dsi, ctl->feature_val);
 		break;
 	case DISP_FEATURE_BRIGHTNESS:
 		if (!panel_ext->funcs->setbacklight_control) {
@@ -1334,9 +1436,9 @@ int mi_dsi_panel_set_disp_param(struct mtk_dsi *dsi, struct disp_feature_ctl *ct
 			if (private)
 				mutex_lock(&private->commit.lock);
 			mtk_drm_idlemgr_kick(__func__, dsi->encoder.crtc, 0);
-			if (ctl->feature_val == DOZE_TO_NORMAL) {
+			if (ctl->feature_val == DOZE_TO_NORMAL && mi_cfg->feature_val[DISP_FEATURE_DOZE_BRIGHTNESS] != DOZE_TO_NORMAL) {
 				panel_ext->funcs->doze_disable(dsi->panel, dsi, mipi_dsi_dcs_write_gce2, NULL);
-			} else {
+			} else if (ctl->feature_val != DOZE_TO_NORMAL && mi_cfg->feature_val[DISP_FEATURE_DOZE_BRIGHTNESS] == DOZE_TO_NORMAL) {
 				panel_ext->funcs->doze_enable(dsi->panel, dsi, mipi_dsi_dcs_write_gce2, NULL);
 			}
 			if (private)
@@ -1346,6 +1448,54 @@ int mi_dsi_panel_set_disp_param(struct mtk_dsi *dsi, struct disp_feature_ctl *ct
 		} else
 			DISP_ERROR("invaild doze brightness%d\n", ctl->feature_val);
 		break;
+	case DISP_FEATURE_FOD_CALIBRATION_BRIGHTNESS:
+		if (ctl->feature_val == -1) {
+		    DISP_INFO("FOD calibration brightness restore last_bl_level=%d\n",
+			mi_cfg->last_bl_level);
+		if (panel_ext->funcs->setbacklight_control)
+			panel_ext->funcs->setbacklight_control(dsi->panel, mi_cfg->last_bl_level);
+		    mi_cfg->in_fod_calibration = false;
+		} else {
+		    if (ctl->feature_val >= 0 &&
+			ctl->feature_val <= 2047) {
+			mi_cfg->in_fod_calibration = true;
+					if (panel_ext->funcs->panel_elvss_control)
+						panel_ext->funcs->panel_elvss_control(dsi->panel, false);
+					if (panel_ext->funcs->setbacklight_control)
+						panel_ext->funcs->setbacklight_control(dsi->panel, ctl->feature_val);
+			mi_cfg->dimming_state = STATE_NONE;
+		    } else {
+			mi_cfg->in_fod_calibration = false;
+			DISP_ERROR("FOD calibration invalid brightness level:%d\n",
+				ctl->feature_val);
+		    }
+		}
+		mi_cfg->feature_val[DISP_FEATURE_FOD_CALIBRATION_BRIGHTNESS] = ctl->feature_val;
+		break;
+	case DISP_FEATURE_FOD_CALIBRATION_HBM:
+		if (ctl->feature_val == -1) {
+			DISP_INFO("FOD calibration HBM restore last_bl_level=%d\n",
+			    mi_cfg->last_bl_level);
+		if (panel_ext->funcs->hbm_fod_control)
+			panel_ext->funcs->hbm_fod_control(dsi->panel, false);
+		mi_cfg->dimming_state = STATE_DIM_RESTORE;
+		mi_cfg->in_fod_calibration = false;
+		} else {
+			mi_cfg->in_fod_calibration = true;
+			mi_cfg->dimming_state = STATE_DIM_BLOCK;
+			if (panel_ext->funcs->hbm_fod_control)
+				panel_ext->funcs->hbm_fod_control(dsi->panel, true);
+		}
+		mi_cfg->feature_val[DISP_FEATURE_FOD_CALIBRATION_HBM] = ctl->feature_val;
+		break;
+	case DISP_FEATURE_SENSOR_LUX:
+		DISP_DEBUG("DISP_FEATURE_SENSOR_LUX=%d\n", ctl->feature_val);
+		mi_cfg->feature_val[DISP_FEATURE_SENSOR_LUX] = ctl->feature_val;
+		break;
+	case DISP_FEATURE_LOW_BRIGHTNESS_FOD:
+		DISP_INFO("DISP_FEATURE_LOW_BRIGHTNESS_FOD=%d\n", ctl->feature_val);
+		mi_cfg->feature_val[DISP_FEATURE_LOW_BRIGHTNESS_FOD] = ctl->feature_val;
+		break;
 	case DISP_FEATURE_DC:
 		if (!panel_ext->funcs->panel_set_dc)
 			break;
@@ -1353,7 +1503,7 @@ int mi_dsi_panel_set_disp_param(struct mtk_dsi *dsi, struct disp_feature_ctl *ct
 		if (ctl->feature_val == FEATURE_ON){
 			panel_ext->funcs->panel_set_dc(dsi->panel, true);
 			need_lock = true;
-#if IS_ENABLED(CONFIG_DRM_PANEL_L11_38_0A_0A_DSC_CMD) || IS_ENABLED(CONFIG_DRM_PANEL_L11A_38_0A_0A_DSC_CMD) || IS_ENABLED(CONFIG_DRM_PANEL_L2M_38_0A_0A_DSC_CMD)
+#if IS_ENABLED(CONFIG_DRM_PANEL_L11_38_0A_0A_DSC_CMD) || IS_ENABLED(CONFIG_DRM_PANEL_L11A_38_0A_0A_DSC_CMD) || IS_ENABLED(CONFIG_DRM_PANEL_L2M_38_0A_0A_DSC_CMD) || IS_ENABLED(CONFIG_DRM_PANEL_M9_42_02_0A_DSC_CMD) || IS_ENABLED(CONFIG_DRM_PANEL_M11R_38_0A_0A_DSC_CMD)
 #ifdef CONFIG_MI_DISP_SILKY_BRIGHTNESS_CRC
 			mtk_ddp_comp_io_cmd(comp, NULL, MI_RESTORE_CRC_LEVEL, &need_lock);
 			mtk_ddp_comp_io_cmd(comp, NULL, SET_DC_SYNC_TE_MODE_ON, NULL);
@@ -1361,7 +1511,7 @@ int mi_dsi_panel_set_disp_param(struct mtk_dsi *dsi, struct disp_feature_ctl *ct
 #endif
 		} else {
 			panel_ext->funcs->panel_set_dc(dsi->panel, false);
-#if IS_ENABLED(CONFIG_DRM_PANEL_L11_38_0A_0A_DSC_CMD) || IS_ENABLED(CONFIG_DRM_PANEL_L11A_38_0A_0A_DSC_CMD) || IS_ENABLED(CONFIG_DRM_PANEL_L2M_38_0A_0A_DSC_CMD)
+#if IS_ENABLED(CONFIG_DRM_PANEL_L11_38_0A_0A_DSC_CMD) || IS_ENABLED(CONFIG_DRM_PANEL_L11A_38_0A_0A_DSC_CMD) || IS_ENABLED(CONFIG_DRM_PANEL_L2M_38_0A_0A_DSC_CMD) || IS_ENABLED(CONFIG_DRM_PANEL_M9_42_02_0A_DSC_CMD) || IS_ENABLED(CONFIG_DRM_PANEL_M11R_38_0A_0A_DSC_CMD)
 #ifdef CONFIG_MI_DISP_SILKY_BRIGHTNESS_CRC
 			mtk_ddp_comp_io_cmd(comp, NULL, SET_DC_SYNC_TE_MODE_OFF, NULL);
 #endif
@@ -1457,7 +1607,7 @@ int mi_dsi_panel_set_disp_param(struct mtk_dsi *dsi, struct disp_feature_ctl *ct
 			if (!panel_ext->funcs->panel_set_gir_off)
 				break;
 			pr_info("GIR off");
-			panel_ext->funcs->panel_set_gir_off(dsi->panel);
+			schedule_delayed_work(&dsi->gir_off_delayed_work, msecs_to_jiffies(PANEL_GIR_OFF_DELAY));
 			break;
 		}
 		default:
@@ -1469,13 +1619,19 @@ int mi_dsi_panel_set_disp_param(struct mtk_dsi *dsi, struct disp_feature_ctl *ct
 		break;
 	case DISP_FEATURE_FP_STATUS:
 		DISP_INFO("DISP_FEATURE_FP_STATUS=%d\n", ctl->feature_val);
+#ifdef CONFIG_MI_DISP_LHBM
+
 		mi_cfg->feature_val[DISP_FEATURE_FP_STATUS] = ctl->feature_val;
+
+#endif
 		break;
 	case DISP_FEATURE_LCD_HBM:
 		if(is_support_lcd_hbm_level(ctl->feature_val)) {
 			DISP_INFO("DISP_FEATURE_LCD_HBM=%d\n", ctl->feature_val);
 			if (panel_ext->funcs->normal_hbm_control) {
 				panel_ext->funcs->normal_hbm_control(dsi->panel, ctl->feature_val);
+				dsi->mi_cfg.normal_hbm_flag = ctl->feature_val == FEATURE_ON ?
+					true:false;
 			}
 			mi_cfg->feature_val[DISP_FEATURE_LCD_HBM] = ctl->feature_val;
 		} else
@@ -1562,7 +1718,7 @@ void mi_dsi_panel_mi_cfg_state_update(struct mtk_dsi *dsi, int power_state)
 
 	DISP_INFO("power state:%d\n", power_state);
 	switch (power_state) {
-	case MI_DISP_POWER_POWERDOWN:
+	case MI_DISP_POWER_OFF:
 		mi_cfg->feature_val[DISP_FEATURE_DOZE_BRIGHTNESS] = DOZE_TO_NORMAL;
 		mi_cfg->feature_val[DISP_FEATURE_HBM] = FEATURE_OFF;
 		mi_cfg->feature_val[DISP_FEATURE_DC] = FEATURE_OFF;
@@ -1576,6 +1732,18 @@ void mi_dsi_panel_mi_cfg_state_update(struct mtk_dsi *dsi, int power_state)
 	}
 
 	return;
+}
+
+bool is_aod_and_panel_initialized(struct mtk_dsi *dsi)
+{
+	if (!dsi) {
+		pr_err("%s NULL dsi\n", __func__);
+		return false;
+	}
+
+	if (dsi->output_en && dsi->doze_enabled)
+		return true;
+	return false;
 }
 
 void mi_disp_cfg_init(struct mtk_dsi *dsi)
@@ -1616,6 +1784,14 @@ void mi_disp_cfg_init(struct mtk_dsi *dsi)
 		dsi->mi_cfg.max_brightness_clone = DEFAULT_MAX_BRIGHTNESS_CLONE;
 		dsi->mi_cfg.thermal_max_brightness_clone = DEFAULT_MAX_BRIGHTNESS_CLONE;
 		DISP_INFO("default max brightness clone:%d\n", dsi->mi_cfg.max_brightness_clone);
+	}
+
+	ret = mi_dsi_panel_get_factory_max_brightness(dsi, &dsi->mi_cfg.factory_max_brightness);
+	if (!ret) {
+		DISP_INFO("factory_max_brightness:%d\n", dsi->mi_cfg.factory_max_brightness);
+	} else {
+		dsi->mi_cfg.factory_max_brightness = 2047;
+		DISP_INFO("default factory_max_brightness:%d\n", dsi->mi_cfg.factory_max_brightness);
 	}
 	dsi->mi_cfg.real_brightness_clone = -1;
 

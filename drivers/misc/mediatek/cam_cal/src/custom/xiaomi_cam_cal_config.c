@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2019 MediaTek Inc.
- * Copyright (C) 2022 XiaoMi, Inc.
  */
 
 #define PFX "CAM_CAL_XIAOMI"
@@ -90,6 +89,21 @@ unsigned int xiaomi_do_part_number(struct EEPROM_DRV_FD_DATA *pdata,
 	read_data(pdata, pCamCalData->sensorID, pCamCalData->deviceID, 0x01, 1, &vendor_id);
 	pCamCalData->PartNumber[0] = vendor_id;
 	pCamCalData->PartNumber[1] = 0;
+#if defined(RUBENS_CAM)
+	if (pCamCalData->sensorID == 0x582) {
+		read_data(pdata, pCamCalData->sensorID, pCamCalData->deviceID, 0x09, 1, &lens_id);
+        	pCamCalData->PartNumber[0] = lens_id;
+	}
+#endif
+#if defined(PLATO_CAM)
+	if (pCamCalData->sensorID == 0x1AD6) {
+		read_data(pdata, pCamCalData->sensorID, pCamCalData->deviceID, 0x08, 1, &lens_id);
+		CAM_CAL_LOG_DBG("lens_id = 0x%x ",lens_id);
+		if(lens_id == 0xF3){
+			pCamCalData->PartNumber[0] = lens_id;
+		}
+	}
+#endif
 
 	CAM_CAL_LOG_DBG("======================Part Number==================\n");
 	CAM_CAL_LOG_DBG("[Part Number] = %x %x %x %x\n",
@@ -111,9 +125,7 @@ unsigned int xiaomi_do_part_number(struct EEPROM_DRV_FD_DATA *pdata,
 
 
 #define AWB_FLAG         0x750
-#ifdef XAGA_CAM
 #define AWB_757_FLAG         0x757
-#endif
 #define AF_FLAG          0x27
 
 #define AF_MAC_DIS_ADDR  0x2B
@@ -158,7 +170,8 @@ unsigned int xiaomi_do_2a_gain(struct EEPROM_DRV_FD_DATA *pdata,
 			AWB_FLAG, 1, (unsigned char *)&AWBConfig);
 	if (read_data_size > 0) {
 		err = CAM_CAL_ERR_NO_ERR;
-	} else {
+	}
+	else {
 		CAM_CAL_LOG_ERR("Read Failed\n");
 		show_cmd_error_log(pCamCalData->Command);
 		return err;
@@ -216,7 +229,8 @@ unsigned int xiaomi_do_2a_gain(struct EEPROM_DRV_FD_DATA *pdata,
 			AF_FLAG, 1, (unsigned char *)&AFConfig);
 	if (read_data_size > 0) {
 		err = CAM_CAL_ERR_NO_ERR;
-	} else {
+	}
+	else {
 		CAM_CAL_LOG_ERR("Read Failed\n");
 		show_cmd_error_log(pCamCalData->Command);
 		return err;
@@ -264,7 +278,6 @@ unsigned int xiaomi_do_2a_gain(struct EEPROM_DRV_FD_DATA *pdata,
 	return err;
 }
 
-#ifdef XAGA_CAM
 unsigned int xiaomi_do_2a_gain_else(struct EEPROM_DRV_FD_DATA *pdata,
 		unsigned int start_addr, unsigned int block_size, unsigned int *pGetSensorCalData)
 {
@@ -302,7 +315,8 @@ unsigned int xiaomi_do_2a_gain_else(struct EEPROM_DRV_FD_DATA *pdata,
 			AWB_757_FLAG, 1, (unsigned char *)&AWBConfig);
 	if (read_data_size > 0) {
 		err = CAM_CAL_ERR_NO_ERR;
-	} else {
+	}
+	else {
 		CAM_CAL_LOG_ERR("Read Failed\n");
 		show_cmd_error_log(pCamCalData->Command);
 		return err;
@@ -360,7 +374,8 @@ unsigned int xiaomi_do_2a_gain_else(struct EEPROM_DRV_FD_DATA *pdata,
 			AF_FLAG, 1, (unsigned char *)&AFConfig);
 	if (read_data_size > 0) {
 		err = CAM_CAL_ERR_NO_ERR;
-	} else {
+	}
+	else {
 		CAM_CAL_LOG_ERR("Read Failed\n");
 		show_cmd_error_log(pCamCalData->Command);
 		return err;
@@ -407,7 +422,6 @@ unsigned int xiaomi_do_2a_gain_else(struct EEPROM_DRV_FD_DATA *pdata,
 
 	return err;
 }
-#endif
 
 
 /***********************************************************************************
@@ -442,10 +456,6 @@ unsigned int xiaomi_do_single_lsc(struct EEPROM_DRV_FD_DATA *pdata,
 	pCamCalData->SingleLsc.LscTable.MtkLcsData.TableSize = table_size;
 	if (table_size > 0) {
 		pCamCalData->SingleLsc.TableRotation = 0;
-#if defined(MATISSE_CAM) || defined(RUBENS_CAM)
-	if (0xfad2 == pCamCalData->sensorID || 0x0582 == pCamCalData->sensorID)
-		pCamCalData->SingleLsc.TableRotation = 1; //Because the module made the mirror and flip
-#endif
 		CAM_CAL_LOG_DBG("u4Offset=%d u4Length=%d", start_addr, table_size);
 		CAM_CAL_LOG_DBG("sensorID : 0x%x TableRotation : %d\n", pCamCalData->sensorID,
 			pCamCalData->SingleLsc.TableRotation);
@@ -457,7 +467,7 @@ unsigned int xiaomi_do_single_lsc(struct EEPROM_DRV_FD_DATA *pdata,
 		if (table_size == read_data_size)
 			err = CAM_CAL_ERR_NO_ERR;
 		else {
-			CAM_CAL_LOG_ERR("Read Failed\n");
+			CAM_CAL_LOG_ERR("Read Failed read_data_size = %d\n", read_data_size);
 			err = CamCalReturnErr[pCamCalData->Command];
 			show_cmd_error_log(pCamCalData->Command);
 			return err;
@@ -501,7 +511,8 @@ unsigned int xiaomi_do_pdaf(struct EEPROM_DRV_FD_DATA *pdata,
 	if (read_data_size > 0) {
 		pCamCalData->PDAF.Size_of_PDAF = 496;
 		err = CAM_CAL_ERR_NO_ERR;
-	} else {
+	}
+	else {
 		CAM_CAL_LOG_ERR("Read Failed\n");
 		show_cmd_error_log(pCamCalData->Command);
 		return err;
@@ -512,7 +523,6 @@ unsigned int xiaomi_do_pdaf(struct EEPROM_DRV_FD_DATA *pdata,
 			(u8 *)&pCamCalData->PDAF.Data[496]);
 
 	pCamCalData->PDAF.Size_of_PDAF = 1500;
-
 	CAM_CAL_LOG_DBG("======================PDAF Data==================\n");
 	CAM_CAL_LOG_DBG("First five %x, %x, %x, %x, %x\n",
 		pCamCalData->PDAF.Data[0],

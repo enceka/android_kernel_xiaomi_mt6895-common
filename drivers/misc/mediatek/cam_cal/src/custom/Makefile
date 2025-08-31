@@ -1,6 +1,5 @@
 #
 # Copyright (C) 2018 MediaTek Inc.
-# Copyright (C) 2022 XiaoMi, Inc.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License version 2 as
@@ -46,6 +45,12 @@ BUILD_PROJECT_NAME := rubens
 endif
 ifeq ($(CONFIG_BUILD_XIAOMI_CAMERA_IMAGE_NAMES),"xaga")
 BUILD_PROJECT_NAME := xaga
+endif
+ifeq ($(CONFIG_BUILD_XIAOMI_CAMERA_IMAGE_NAMES),"pearl")
+BUILD_PROJECT_NAME := pearl
+endif
+ifeq ($(CONFIG_BUILD_XIAOMI_CAMERA_IMAGE_NAMES),"plato")
+BUILD_PROJECT_NAME := plato
 endif
 
 KERNEL_CAM_CAL_SRC := $(notdir $(wildcard $(CAM_CAL_CUSTOM_SRC_LAYOUT_PATH)/$(BUILD_PROJECT_NAME)*.c))

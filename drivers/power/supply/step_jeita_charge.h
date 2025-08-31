@@ -10,7 +10,18 @@
 #define TYPEC_BURN_HYST		100
 
 #define MAX_THERMAL_FCC		22000
+
+#if  defined (CONFIG_TARGET_PRODUCT_YUECHU)
+#define MIN_THERMAL_FCC		200
+#define ITERM_FCC_WARM		1547
+#define ENABLE_FCC_ITERM_LEVEL	13
+#define WARM_TEMP        	480
+#else
 #define MIN_THERMAL_FCC		500
+#define ITERM_FCC_WARM		800
+#define ENABLE_FCC_ITERM_LEVEL	14
+#define WARM_TEMP        	481
+#endif
 
 struct step_jeita_cfg0 {
 	int low_threshold;

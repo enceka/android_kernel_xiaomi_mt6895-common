@@ -1,6 +1,6 @@
 /*******************************************************************************************
 * Description:	XIAOMI-BSP-CHARGE
-* 		This xmc_detection.c is the monitor for plugin/plugout/charger_type notify.
+* 		This xmc_detection.c is the monitor for plugin/plugout/charger_type/OTG notify.
 *		The notifier usually comes from TCPC or BC1.2/QC IC.
 * ------------------------------ Revision History: --------------------------------
 * <version>	<date>		<author>			<desc>
@@ -28,6 +28,8 @@ static enum xmc_typec_mode xmc_get_typec_mode(struct tcp_notify *noti)
 		default:
 			return POWER_SUPPLY_TYPEC_SOURCE_DEFAULT;
 		}
+	case TYPEC_ATTACHED_SRC:
+		return POWER_SUPPLY_TYPEC_SINK;
 	case TYPEC_ATTACHED_AUDIO:
 		return POWER_SUPPLY_TYPEC_SINK_AUDIO_ADAPTER;
 	case TYPEC_ATTACHED_CUSTOM_SRC:
@@ -37,12 +39,42 @@ static enum xmc_typec_mode xmc_get_typec_mode(struct tcp_notify *noti)
 	}
 }
 
+void xmc_enable_otg_boost(bool enable)
+{
+	struct power_supply *usb_psy = NULL;
+	struct charge_chip *chip = NULL;
+
+	usb_psy = power_supply_get_by_name("usb");
+	if (!usb_psy) {
+		xmc_err("[XMC_DETECT] OTG BOOST, failed to get usb_psy");
+		return;
+	}
+
+	chip = power_supply_get_drvdata(usb_psy);
+	if (!chip) {
+		xmc_err("[XMC_DETECT] OTG BOOST, failed to get charge_chip");
+		return;
+	}
+
+	xmc_err("[XMC_DETECT] OTG BOOST, enable = %d\n", enable);
+	chip->usb_typec.otg_boost = enable;
+	if (chip->usb_typec.otg_boost) {
+		schedule_delayed_work(&chip->burn_monitor_work, 0);
+	} else {
+		if (!chip->usb_typec.burn_detect)
+			cancel_delayed_work_sync(&chip->burn_monitor_work);
+	}
+}
+EXPORT_SYMBOL(xmc_enable_otg_boost);
+
 static void xmc_charger_attach_detach(struct charge_chip *chip, bool plug)
 {
+	chip->fake_charger_present = plug;
 	if (plug) {
-		pm_stay_awake(chip->dev);
+		__pm_stay_awake(chip->usb_typec.attach_wakelock);
 	} else {
-		pm_relax(chip->dev);
+		__pm_relax(chip->usb_typec.attach_wakelock);
+		power_supply_changed(chip->usb_psy);
 	}
 }
 
@@ -58,7 +90,18 @@ static int xmc_bc12_qc_notifier_func(struct notifier_block *nb, unsigned long ev
 	if (strcmp(psy->desc->name, chip->bc12_qc_psy->desc->name) || event != PSY_EVENT_PROP_CHANGED)
 		return NOTIFY_OK;
 
+	if (chip->usb_typec.otg_boost) {
+		xmc_info("OTG enable, ignore BC1.2\n");
+		chip->usb_typec.bc12_type = XMC_BC12_TYPE_NONE;
+		return NOTIFY_OK;
+	}
+
 	power_supply_get_property(psy, POWER_SUPPLY_PROP_USB_TYPE, &val);
+
+	if ((val.intval == POWER_SUPPLY_USB_TYPE_FLOAT || val.intval == POWER_SUPPLY_USB_TYPE_SDP) && (!chip->fake_charger_present && chip->usb_typec.typec_mode != POWER_SUPPLY_TYPEC_SINK_AUDIO_ADAPTER)) {
+		xmc_info("ignore FLOAT type\n");
+		return NOTIFY_OK;
+	}
 
 	if (chip->chip_list.bc12_qc_chip == BC12_PMIC) {
 		if (val.intval == POWER_SUPPLY_USB_TYPE_UNKNOWN) {
@@ -67,9 +110,12 @@ static int xmc_bc12_qc_notifier_func(struct notifier_block *nb, unsigned long ev
 		} else if (val.intval <= POWER_SUPPLY_USB_TYPE_CDP) {
 			new_bc12_type = val.intval;
 			new_qc_type = chip->usb_typec.qc_type;
-		} else if (val.intval == POWER_SUPPLY_USB_TYPE_ACA) {
+		} else if (val.intval == POWER_SUPPLY_USB_TYPE_HVCHG) {
 			new_bc12_type = chip->usb_typec.bc12_type;
 			new_qc_type = XMC_QC_TYPE_HVCHG;
+		} else if (val.intval == POWER_SUPPLY_USB_TYPE_FLOAT) {
+			new_bc12_type = XMC_BC12_TYPE_FLOAT;
+			new_qc_type = chip->usb_typec.qc_type;
 		} else {
 			xmc_err("[XMC_DETECT] not supported bc12_qc_type\n");
 			return NOTIFY_OK;
@@ -92,6 +138,7 @@ static int xmc_bc12_qc_notifier_func(struct notifier_block *nb, unsigned long ev
 	if (report_sysfs) {
 		power_supply_changed(chip->usb_psy);
 		xmc_sysfs_report_uevent(chip->usb_psy);
+		xmc_sysfs_report_uevent(chip->bms_psy);
 	}
 
 	if (schedule_monitor)
@@ -136,7 +183,7 @@ static void xmc_receive_pd_state(struct charge_chip *chip, struct tcp_notify *no
 		if (chip->usb_typec.pd_type <= XMC_PD_TYPE_PD2 && new_pd_type >= XMC_PD_TYPE_PD3)
 			chip->adapter.uvdm_state = USBPD_UVDM_CONNECT;
 
-		if (!chip->usb_typec.pd_type && !chip->usb_typec.bc12_type && !chip->usb_typec.qc_type && new_pd_type)
+		if ((chip->usb_typec.pd_type || chip->usb_typec.bc12_type || chip->usb_typec.qc_type) != !!new_pd_type)
 			schedule_monitor = true;
 		report_sysfs = true;
 		chip->usb_typec.pd_type = new_pd_type;
@@ -146,6 +193,7 @@ static void xmc_receive_pd_state(struct charge_chip *chip, struct tcp_notify *no
 	if (report_sysfs) {
 		power_supply_changed(chip->usb_psy);
 		xmc_sysfs_report_uevent(chip->usb_psy);
+		xmc_sysfs_report_uevent(chip->bms_psy);
 	}
 
 	if (schedule_monitor)
@@ -156,7 +204,7 @@ static void xmc_receive_uvdm(struct charge_chip *chip, struct tcp_notify *noti)
 {
 	int i = 0, cmd = 0;
 
-	if (noti->uvdm_msg.uvdm_svid != USBPD_MI_SVID) {
+	if (noti->uvdm_msg.uvdm_svid != USBPD_MI_SVID && noti->uvdm_msg.uvdm_svid != 0x2B01) {
 		xmc_info("[XMC_AUTH] VID = 0x%04x is not 0x2717, abort\n", noti->uvdm_msg.uvdm_svid);
 		return;
 	}
@@ -164,7 +212,7 @@ static void xmc_receive_uvdm(struct charge_chip *chip, struct tcp_notify *noti)
 	cmd = USBPD_UVDM_HDR_CMD(noti->uvdm_msg.uvdm_data[0]);
 	xmc_info("[XMC_AUTH] receive UVDM, [cmd ack cnt svid] = [%d %d %d 0x%04x]\n", cmd, noti->uvdm_msg.ack, noti->uvdm_msg.uvdm_cnt, noti->uvdm_msg.uvdm_svid);
 
-	if (noti->uvdm_msg.uvdm_svid != USBPD_MI_SVID)
+	if (noti->uvdm_msg.uvdm_svid != USBPD_MI_SVID && noti->uvdm_msg.uvdm_svid != 0x2B01)
 		return;
 
 	switch (cmd) {
@@ -202,17 +250,32 @@ static void xmc_receive_uvdm(struct charge_chip *chip, struct tcp_notify *noti)
 	chip->adapter.uvdm_state = cmd;
 }
 
+static void xmc_audio_adapter_wa_func(struct work_struct *work)
+{
+	struct charge_chip *chip = container_of(work, struct charge_chip, audio_adapter_wa_work.work);
+	int vbus = 0;
+
+	if (!chip->usb_typec.bc12_type && !chip->usb_typec.bc12_type && !chip->usb_typec.bc12_type) {
+		xmc_ops_get_vbus(chip->bbc_dev, &vbus);
+		if (vbus >= 4000)
+			xmc_ops_bc12_enable(chip->bbc_dev, true);
+	}
+
+	schedule_delayed_work(&chip->audio_adapter_wa_work, msecs_to_jiffies(1000));
+}
+
 static int xmc_tcpc_notifier_func(struct notifier_block *nb, unsigned long event, void *data)
 {
 	struct charge_chip *chip = container_of(nb, struct charge_chip, tcpc_nb);
 	struct tcp_notify *noti = data;
+	enum xmc_typec_mode typec_mode = POWER_SUPPLY_TYPEC_NONE;
 
 	switch (event) {
 	case TCP_NOTIFY_TYPEC_STATE: /* 14 */
-		chip->usb_typec.typec_mode = xmc_get_typec_mode(noti);
+		typec_mode = xmc_get_typec_mode(noti);
 		chip->usb_typec.cc_orientation = noti->typec_state.polarity ? TYPEC_ORIENTATION_NORMAL : TYPEC_ORIENTATION_REVERSE;
 		xmc_info("[XMC_DETECT] typec_state notify, typec_mode = %d, orientation = %d, new_state = %d, old_state = %d\n",
-			chip->usb_typec.typec_mode, chip->usb_typec.cc_orientation, noti->typec_state.new_state, noti->typec_state.old_state);
+			typec_mode, chip->usb_typec.cc_orientation, noti->typec_state.new_state, noti->typec_state.old_state);
 		if (noti->typec_state.old_state == TYPEC_UNATTACHED && (noti->typec_state.new_state == TYPEC_ATTACHED_SNK ||
 			noti->typec_state.new_state == TYPEC_ATTACHED_CUSTOM_SRC || noti->typec_state.new_state == TYPEC_ATTACHED_NORP_SRC)) {
 			xmc_charger_attach_detach(chip, true);
@@ -220,6 +283,13 @@ static int xmc_tcpc_notifier_func(struct notifier_block *nb, unsigned long event
 			noti->typec_state.old_state == TYPEC_ATTACHED_NORP_SRC) && noti->typec_state.new_state == TYPEC_UNATTACHED) {
 			xmc_charger_attach_detach(chip, false);
 		}
+
+		if (chip->usb_typec.typec_mode != POWER_SUPPLY_TYPEC_SINK_AUDIO_ADAPTER && typec_mode == POWER_SUPPLY_TYPEC_SINK_AUDIO_ADAPTER)
+			schedule_delayed_work(&chip->audio_adapter_wa_work, msecs_to_jiffies(100));
+		else if (chip->usb_typec.typec_mode == POWER_SUPPLY_TYPEC_SINK_AUDIO_ADAPTER && typec_mode != POWER_SUPPLY_TYPEC_SINK_AUDIO_ADAPTER)
+			cancel_delayed_work_sync(&chip->audio_adapter_wa_work);
+
+		chip->usb_typec.typec_mode = typec_mode;
 		break;
 	case TCP_NOTIFY_PD_STATE: /* 15 */
 		xmc_receive_pd_state(chip, noti);
@@ -249,6 +319,8 @@ bool xmc_detection_init(struct charge_chip *chip)
 		xmc_err("[XMC_PROBE] failed to get bc12_qc_psy\n");
 		return false;
 	}
+
+	INIT_DELAYED_WORK(&chip->audio_adapter_wa_work, xmc_audio_adapter_wa_func);
 
 	chip->tcpc_nb.notifier_call = xmc_tcpc_notifier_func;
 	rc = register_tcp_dev_notifier(chip->tcpc_dev, &chip->tcpc_nb, TCP_NOTIFY_TYPE_USB | TCP_NOTIFY_TYPE_VBUS | TCP_NOTIFY_TYPE_MODE | TCP_NOTIFY_TYPE_MISC);

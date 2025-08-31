@@ -206,6 +206,9 @@ static struct mtk_video_fmt *mtk_find_fmt_by_pixel(unsigned int pixelformat)
 static struct mtk_q_data *mtk_vdec_get_q_data(struct mtk_vcodec_ctx *ctx,
 	enum v4l2_buf_type type)
 {
+	if (ctx == NULL)
+		return NULL;
+
 	if (V4L2_TYPE_IS_OUTPUT(type))
 		return &ctx->q_data[MTK_Q_DATA_SRC];
 
@@ -225,7 +228,7 @@ static struct vb2_buffer *get_display_buffer(struct mtk_vcodec_ctx *ctx,
 	struct mtk_video_dec_buf *dstbuf;
 	unsigned int i = 0;
 	unsigned int num_planes = 0;
-	unsigned long frame_size;
+	bool no_output = false;
 	u64 max_ts;
 
 	mtk_v4l2_debug(4, "[%d]", ctx->id);
@@ -250,18 +253,17 @@ static struct vb2_buffer *get_display_buffer(struct mtk_vcodec_ctx *ctx,
 	}
 
 	if (disp_frame_buffer->status & FB_ST_NO_GENERATED) {
-		frame_size = 0;
+		no_output = true;
 		disp_frame_buffer->status &= ~FB_ST_NO_GENERATED;
-	} else
-		frame_size = ctx->picinfo.fb_sz[i];
+	}
 
 	dstbuf = container_of(disp_frame_buffer, struct mtk_video_dec_buf,
 						  frame_buffer);
 	num_planes = dstbuf->vb.vb2_buf.num_planes;
 	if (dstbuf->used) {
-		for (i = 0; i < num_planes; i++) {
-			vb2_set_plane_payload(&dstbuf->vb.vb2_buf, i, frame_size);
-		}
+		for (i = 0; i < num_planes; i++)
+			vb2_set_plane_payload(&dstbuf->vb.vb2_buf, i,
+				no_output ? 0 : ctx->picinfo.fb_sz[i]);
 
 		dstbuf->ready_to_display = true;
 
@@ -2060,14 +2062,21 @@ static int vb2ops_vdec_queue_setup(struct vb2_queue *vq,
 	unsigned int sizes[],
 	struct device *alloc_devs[])
 {
-	struct mtk_vcodec_ctx *ctx = vb2_get_drv_priv(vq);
+	struct mtk_vcodec_ctx *ctx;
 	struct mtk_q_data *q_data;
 	unsigned int i;
 
-	q_data = mtk_vdec_get_q_data(ctx, vq->type);
+	if (IS_ERR_OR_NULL(vq) || IS_ERR_OR_NULL(nbuffers) ||
+	    IS_ERR_OR_NULL(nplanes) || IS_ERR_OR_NULL(alloc_devs)) {
+		mtk_v4l2_err("vq %p, nbuffers %p, nplanes %p, alloc_devs %p",
+			vq, nbuffers, nplanes, alloc_devs);
+		return -EINVAL;
+	}
 
-	if (q_data == NULL) {
-		mtk_v4l2_err("vq->type=%d err\n", vq->type);
+	ctx = vb2_get_drv_priv(vq);
+	q_data = mtk_vdec_get_q_data(ctx, vq->type);
+	if (q_data == NULL || (*nplanes) > MTK_VCODEC_MAX_PLANES) {
+		mtk_v4l2_err("vq->type=%d nplanes %d err", vq->type, *nplanes);
 		return -EINVAL;
 	}
 

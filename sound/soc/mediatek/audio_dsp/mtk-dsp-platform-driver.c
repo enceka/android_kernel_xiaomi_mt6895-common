@@ -796,14 +796,14 @@ static int mtk_dsp_manage_copybuf(bool action,
 			return ENOSYS;
 		if (dsp_mep->dsp_copy_buf != NULL)
 			return ENOSYS;
-		dsp_mep->dsp_copy_buf = kzalloc(size, GFP_KERNEL);
+		dsp_mep->dsp_copy_buf = vmalloc(size);
 		if (!dsp_mep)
-			return ENOMEM;
+			return -ENOMEM;
 		//pr_info("%s size = %u\n,", __func__, size);
 	} else {
 		if (dsp_mep->dsp_copy_buf == NULL)
 			return ENOSYS;
-		kfree(dsp_mep->dsp_copy_buf);
+		vfree(dsp_mep->dsp_copy_buf);
 		dsp_mep->dsp_copy_buf = NULL;
 		//pr_info("%s free dsp_copy_buf\n", __func__);
 	}

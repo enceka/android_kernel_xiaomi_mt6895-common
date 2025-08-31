@@ -57,10 +57,19 @@ int mi_drm_bl_wait_for_completion(struct drm_crtc *crtc, unsigned int level)
 		mtk_drm_trace_begin("mi_drm_bl_wait_for_completion-%d", level);
 
 		reinit_completion(&dsi->bl_wait_completion);
+
+#if IS_ENABLED(CONFIG_DRM_PANEL_M9_42_02_0A_DSC_CMD)
+		wait_for_completion(&dsi->bl_wait_completion);
+#else
+#if IS_ENABLED(CONFIG_DRM_PANEL_M11R_38_0A_0A_DSC_CMD)
+		ret = wait_for_completion_timeout(&dsi->bl_wait_completion, msecs_to_jiffies(800));
+#else
 		ret = wait_for_completion_timeout(&dsi->bl_wait_completion, msecs_to_jiffies(300));
+#endif
+#endif
 		DISP_INFO("bl_wait_for_completion_timeout return %d\n", ret);
 
- 		mtk_drm_trace_end();
+		mtk_drm_trace_end();
 	}
 
 	return ret;
@@ -99,6 +108,23 @@ static int mi_drm_update_aod_status(struct mtk_dsi *dsi, bool doze_state, bool i
 	return 0;
 }
 
+#ifdef CONFIG_MI_DISP_DOZE_SUSPEND
+static int mi_drm_update_fod_anim_status(struct mtk_dsi *dsi, bool fod_anim_flag)
+{
+	struct mi_dsi_panel_cfg *mi_cfg = NULL;
+
+	if (!dsi) {
+		DISP_ERROR("invalid display ptr\n");
+		return -EINVAL;
+	}
+
+	mi_cfg = &dsi->mi_cfg;
+	mi_cfg->fod_anim_flag = fod_anim_flag;
+
+	return 0;
+}
+#endif
+
 int mi_drm_crtc_update_layer_state(struct drm_crtc *crtc)
 {
 	int ret = 0;
@@ -113,8 +139,12 @@ int mi_drm_crtc_update_layer_state(struct drm_crtc *crtc)
 	struct mtk_ddp_comp *comp = mtk_ddp_comp_request_output(mtk_crtc);
 	struct mtk_dsi *dsi = NULL;
 
-	int crtc_id = drm_crtc_index(crtc);
-	if (!(comp && comp->funcs && comp->funcs->io_cmd)) {
+	if (drm_crtc_index(crtc)) {
+		DISP_ERROR("only primary crtc need to update\n");
+		return -EINVAL;
+	}
+
+	if (!comp || mtk_ddp_comp_get_type(comp->id) != MTK_DSI) {
 		DISP_ERROR("invalid comp_output\n");
 		return -EINVAL;
 	}
@@ -129,14 +159,21 @@ int mi_drm_crtc_update_layer_state(struct drm_crtc *crtc)
 	mi_layer_flags = (uint32_t)state->prop_val[CRTC_PROP_MI_FOD_SYNC_INFO];
 	doze_state = state->prop_val[CRTC_PROP_DOZE_ACTIVE];
 
+	/* Update aod status */
 	cur_flags.aod_flag = (mi_layer_flags & MI_LAYER_AOD) ? true : false;
 	mtk_drm_trace_c("%d|MI_LAYER_AOD|%d", MI_TRACE_LAYER_ID, cur_flags.aod_flag);
-
 	if (cur_flags.aod_flag != last_flags->aod_flag)
 		DISP_INFO("layer AOD = %d\n", cur_flags.aod_flag);
+	mi_drm_update_aod_status(dsi, doze_state, !cur_flags.aod_flag);
 
-	if (crtc_id == 0)
-		mi_drm_update_aod_status(dsi, doze_state, !cur_flags.aod_flag);
+#ifdef CONFIG_MI_DISP_DOZE_SUSPEND
+	/* Update gxzw_anim status */
+	cur_flags.fod_anim_flag = (mi_layer_flags & MI_LAYER_FOD_ANIM) ? true : false;
+	mtk_drm_trace_c("%d|MI_LAYER_FOD_ANIM|%d", MI_TRACE_LAYER_ID, cur_flags.fod_anim_flag);
+	if (cur_flags.fod_anim_flag != last_flags->fod_anim_flag)
+		DISP_INFO("cur fod_anim_flag = %d\n", cur_flags.fod_anim_flag);
+	mi_drm_update_fod_anim_status(dsi, cur_flags.fod_anim_flag);
+#endif
 
 	dsi->mi_layer_state.layer_flags = cur_flags;
 

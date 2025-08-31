@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (c) 2019 MediaTek Inc.
-// Copyright (C) 2022 XiaoMi, Inc.
 
 /*****************************************************************************
  *
@@ -1454,19 +1453,19 @@ static int feature_control(
 
 	/*GC02M1_LOG_DBG("feature_id = %d\n", feature_id);*/
 	switch (feature_id) {
-	case SENSOR_FEATURE_GET_OUTPUT_FORMAT_BY_SCENARIO:
-		switch (*feature_data) {
-		default:
-			*(feature_data + 1)
-			= (enum ACDK_SENSOR_OUTPUT_DATA_FORMAT_ENUM)
-				imgsensor_info.sensor_output_dataformat;
-			break;
-		}
-		GC02M1_LOG_INF("SENSOR_FEATURE_GET_OUTPUT_FORMAT_BY_SCENARIO get:%d\n", *(feature_data + 1));
-		break;
+         case SENSOR_FEATURE_GET_OUTPUT_FORMAT_BY_SCENARIO:
+                switch (*feature_data) {
+                default:
+                        *(feature_data + 1)
+                        = (enum ACDK_SENSOR_OUTPUT_DATA_FORMAT_ENUM)
+                               imgsensor_info.sensor_output_dataformat;
+                        break;
+                }
+                GC02M1_LOG_INF("SENSOR_FEATURE_GET_OUTPUT_FORMAT_BY_SCENARIO get:%d\n",*(feature_data + 1));
+                break;
 	case SENSOR_FEATURE_GET_AWB_REQ_BY_SCENARIO:
 		switch (*feature_data) {
-		case SENSOR_SCENARIO_ID_CUSTOM3:
+	case SENSOR_SCENARIO_ID_CUSTOM3:
 			*(MUINT32 *)(uintptr_t)(*(feature_data + 1)) = 1;
 			break;
 		default:

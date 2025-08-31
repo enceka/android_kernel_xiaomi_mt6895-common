@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (c) 2019 MediaTek Inc.
-// Copyright (C) 2022 XiaoMi, Inc.
 
 /*****************************************************************************
  *
@@ -193,7 +192,7 @@ static struct SENSOR_WINSIZE_INFO_STRUCT imgsensor_winsize_info[6] = {
 	{ 5184, 3904,    0,     0,  5184, 3904,  2592, 1952,    0,    244,  2592, 1464,    0,    0,  2592, 1464}, // video
 	{ 5184, 3904,    0,     0,  5184, 3904,  2592, 1952,    336,    436,  1920, 1080,    0,    0,  1920, 1080}, // high speed video 120ps
 	{ 5184, 3904,    0,     0,  5184, 3904,  2592, 1952,    0,    0,  2592, 1952,    0,    0,  2592, 1952}, // slim video same as preview
-	{ 5184, 3904,    0,     0,  5184, 3904,  2592, 1952,    0,    244,  2592, 1464,    0,    0,  2592, 1464}, // custom1 stere0 as Preview
+	{ 5184, 3904,    0,     0,  5184, 3904,  2592, 1952,    0,    244,  2592, 1464,    0,    0,  2592, 1464}, // custom1 stere0 as Preview 
 };
 
 
@@ -1318,7 +1317,7 @@ static int feature_control(
 				imgsensor_info.sensor_output_dataformat;
 			break;
 		}
-		IMX596_LOG_DBG("SENSOR_FEATURE_GET_OUTPUT_FORMAT_BY_SCENARIO get:%d\n", *(feature_data + 1));
+		IMX596_LOG_DBG("SENSOR_FEATURE_GET_OUTPUT_FORMAT_BY_SCENARIO get:%d\n",*(feature_data + 1));
 	break;
 	case SENSOR_FEATURE_GET_AWB_REQ_BY_SCENARIO:
 		switch (*feature_data) {

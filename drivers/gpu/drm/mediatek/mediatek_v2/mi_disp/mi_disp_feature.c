@@ -42,6 +42,10 @@
 #ifdef CONFIG_MI_DISP_BOOST
 #include "mi_disp_boost.h"
 #endif
+#ifdef CONFIG_MI_DISP_LHBM
+#include "mi_disp_lhbm.h"
+#endif
+
 struct disp_feature *g_disp_feature = NULL;
 
 #ifdef CONFIG_MI_DISP_BRIGTHNESS_CLONE_COOLER
@@ -138,6 +142,9 @@ int mi_disp_feature_attach_display(void *display, int disp_id, int intf_type)
 #ifdef CONFIG_MI_DISP_DEBUGFS
 	bool debugfs_inited = false;
 #endif
+#ifdef CONFIG_MI_DISP_LHBM
+	bool lhbm_inited = false;
+#endif
 
 	if (!df) {
 		return -ENODEV;
@@ -170,6 +177,16 @@ int mi_disp_feature_attach_display(void *display, int disp_id, int intf_type)
 			goto err;
 		}
 		disp_thread_inited = true;
+
+#ifdef CONFIG_MI_DISP_LHBM
+		ret = mi_disp_lhbm_fod_thread_create(df, disp_id);
+		if (ret) {
+			DISP_ERROR("failed to create fod_thread kthread\n");
+			goto err;
+		}
+		lhbm_inited = true;
+#endif
+
 #ifdef CONFIG_MI_DISP_PROCFS
 		ret = mi_disp_procfs_init(dd_ptr, disp_id);
 		if (ret) {
@@ -220,7 +237,15 @@ int mi_disp_feature_attach_display(void *display, int disp_id, int intf_type)
 
 	return 0;
 
+
+
 err:
+#ifdef CONFIG_MI_DISP_LHBM
+	if (lhbm_inited) {
+		mi_disp_feature_thread_destroy(df, disp_id);
+	}
+#endif
+
 #ifdef CONFIG_MI_DISP_DEBUGFS
 	if (debugfs_inited) {
 		mi_disp_debugfs_deinit(dd_ptr, disp_id);
@@ -243,6 +268,7 @@ err:
 		device_unregister(dd_ptr->dev);
 		dd_ptr->dev = NULL;
 	}
+
 	return ret;
 }
 

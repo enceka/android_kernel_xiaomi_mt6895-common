@@ -63,6 +63,7 @@ struct cm_mgr_hook {
 /* common api */
 #if IS_ENABLED(CONFIG_MTK_CM_IPI)
 extern int get_cm_step_num(void);
+extern int get_dsu_perf(void);
 #endif
 extern void cm_mgr_update_dram_by_cpu_opp(int cpu_opp);
 #if !IS_ENABLED(CONFIG_MTK_CM_IPI)

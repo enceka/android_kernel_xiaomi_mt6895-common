@@ -102,7 +102,7 @@ static const struct regmap_config wl2866d_regmap_config = {
 };
 
 /*common functions*/
-static int wl2866d_read(struct regmap *regmap, u16 reg, u8 *val, int count)
+static int wl2866d_read(struct regmap *regmap, u16 reg, u8*val, int count)
 {
 	int rc;
 
@@ -115,11 +115,16 @@ static int wl2866d_read(struct regmap *regmap, u16 reg, u8 *val, int count)
 static int wl2866d_write(struct regmap *regmap, u16 reg, u8*val, int count)
 {
 	int rc;
+	u8 temp;
 
-	wl2866d_debug("Writing 0x%02x to 0x%02x\n", *val, reg);
+	wl2866d_err("Writing 0x%02x to 0x%02x\n", *val, reg);
 	rc = regmap_bulk_write(regmap, reg, val, count);
 	if (rc < 0)
 		wl2866d_err("failed to write 0x%04x\n", reg);
+
+	rc = wl2866d_read(regmap, reg, &temp, count);
+
+	wl2866d_err("to write 0x%04x  exp 0x%x now 0x%x \n", reg,*val,temp);
 
 	return rc;
 }
@@ -127,12 +132,47 @@ static int wl2866d_write(struct regmap *regmap, u16 reg, u8*val, int count)
 static int wl2866d_masked_write(struct regmap *regmap, u16 reg, u8 mask, u8 val)
 {
 	int rc;
+	u8 temp = 0,new = 0;
 	wl2866d_debug("Writing 0x%02x to 0x%04x with mask 0x%02x\n", val, reg, mask);
+
+	rc = wl2866d_read(regmap, reg, &temp, 1);
+	temp = 	temp & ~mask;
+	temp |=  val & mask ;
+
 	rc = regmap_update_bits(regmap, reg, mask, val);
 	if (rc < 0)
 		wl2866d_err("failed to write 0x%02x to 0x%04x with mask 0x%02x\n", val, reg, mask);
+
+	rc = wl2866d_read(regmap, reg, &new, 1);
+
+	wl2866d_err("write 0x%04x  exp 0x%x now 0x%x \n", reg,temp,new);
+
 	return rc;
 }
+
+void wl2866d_show_reg_info(struct regmap *regmap)
+{
+	int rc;
+	unsigned int val      = 0xFF;
+	int i = 0;
+
+	if(regmap != NULL){
+		for (i = 0; i <= 0x0F; i++) {
+			rc = regmap_read(regmap, i, &val);
+			if (rc < 0) {
+				wl2866d_err("wl2866d failed to get value \n");
+			}
+			else {
+				wl2866d_err("wl2866d dump reg: addr 0x%x value 0x%x \n",i,val);
+			}
+		}
+		wl2866d_err("dump wl2866d success!");
+	}else{
+		wl2866d_err("regmap == NULL ");
+	}
+}
+EXPORT_SYMBOL(wl2866d_show_reg_info);
+
 
 static int wl2866d_regulator_is_enabled(struct regulator_dev *rdev)
 {
@@ -489,7 +529,7 @@ static ssize_t wl2866d_show_info(struct device *dev,
 	unsigned int len      = 0;
 	int i = 0;
 
-	for (i = 0; i <= 0xF; i++) {
+	for (i = 0; i <= 0x0F; i++) {
 		rc = regmap_read(regmap, i, &val);
 		if (rc < 0) {
 			len += sprintf(buf+len, "read 0x%x ==> fail\n", i);
@@ -539,21 +579,61 @@ static ssize_t wl2866d_set_enable(struct device *dev,
 	return len;
 }
 
+static ssize_t wl2866d_set_reset(struct device *dev,
+	struct device_attribute *attr,
+	const char *buf, size_t len)
+{
+	u8 val = 0, rest_val = 0;
+	int rc;
+	int i = 0;
+	struct regmap *regmap = (struct regmap *)dev->driver_data;
+
+	if (buf[0] == '0' && buf[1] == 'x') {
+		val = (u8)simple_strtoul(buf, NULL, 16);
+	} else {
+		val = (u8)simple_strtoul(buf, NULL, 10);
+	}
+
+	wl2866d_err("wl2866d set_val = 0x%02x \n",val);
+	if(val == 1){
+		wl2866d_show_reg_info(regmap);
+		for (i = 0; i <= 0x0F; i++) {
+			rc = wl2866d_write(regmap, i, &rest_val, 1);
+			if (rc < 0) {
+				wl2866d_err("wl2866d write addr 0x%x failed \n",i);
+			}
+		}
+		wl2866d_show_reg_info(regmap);
+	}
+	return len;
+}
+
 
 static DEVICE_ATTR(status, S_IWUSR|S_IRUSR, wl2866d_show_status, NULL);
 static DEVICE_ATTR(info, S_IWUSR|S_IRUSR, wl2866d_show_info, NULL);
 static DEVICE_ATTR(enable, S_IWUSR|S_IRUSR, wl2866d_show_enable, wl2866d_set_enable);
-
-
+static DEVICE_ATTR(reset, S_IWUSR|S_IRUSR, NULL, wl2866d_set_reset);
 
 
 static int wl2866d_driver_register(int index, struct regmap *regmap)
 {
+	u8 rest_val= 0;
+	int i = 0, rc = 0;
 	char device_drv_name[WL2866D_NAME_STR_LEN_MAX] = { 0 };
 	struct wl2866d_char_dev wl2866d_dev = wl2866d_dev_list[index];
-
 	snprintf(device_drv_name, WL2866D_NAME_STR_LEN_MAX - 1,
 		WL2866D_NAME_FMT, index);
+
+	wl2866d_err("This is wl2866d[%d] \n",index);
+	wl2866d_show_reg_info(regmap);
+	for (i = 0; i <= 0x0F; i++) {
+		rc = wl2866d_write(regmap, i, &rest_val, 1);
+		if (rc < 0) {
+			wl2866d_err("wl2866d write addr 0x%x failed \n",i);
+		}
+	}
+	wl2866d_show_reg_info(regmap);
+
 
 	/* Register char driver */
 	if (alloc_chrdev_region(&(wl2866d_dev.dev_no), 0, 1,
@@ -601,6 +681,7 @@ static int wl2866d_driver_register(int index, struct regmap *regmap)
 	sysfs_create_file(&(wl2866d_dev.pdevice->kobj), &dev_attr_status.attr);
 	sysfs_create_file(&(wl2866d_dev.pdevice->kobj), &dev_attr_info.attr);
 	sysfs_create_file(&(wl2866d_dev.pdevice->kobj), &dev_attr_enable.attr);
+	sysfs_create_file(&(wl2866d_dev.pdevice->kobj), &dev_attr_reset.attr);
 
 	return 0;
 }
@@ -642,7 +723,6 @@ static int wl2866d_regulator_probe(struct i2c_client *client,
 		wl2866d_err("WL2866D failed to parse device tree rc=%d\n", rc);
 		return 0;
 	}
-
 	return 0;
 }
 

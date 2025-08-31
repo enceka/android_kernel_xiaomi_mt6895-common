@@ -563,7 +563,7 @@ androidboot.hardware=mt6895";
 		aw86927_vib_f0_pre = < 1700 >;
 		aw86927_vib_f0_cali_percen = < 7 >;
 		aw86927_vib_cont_drv1_lvl = < 0x7F >;
-		aw86927_vib_cont_drv2_lvl = < 0x36 >;
+		aw86927_vib_cont_drv2_lvl = < 0x22 >;
 		aw86927_vib_cont_drv1_time = < 0x04 >;
 		aw86927_vib_cont_drv2_time = < 0x06 >;
 		aw86927_vib_cont_drv_width = < 0x6A >;
@@ -740,7 +740,7 @@ androidboot.hardware=mt6895";
 			polling-delay = <0>; /* milliseconds */
 			polling-delay-passive = <0>; /* milliseconds */
 			thermal-sensors = <&tboard_thermistor7>;
-		};		
+		};
 };
 
 &odm {

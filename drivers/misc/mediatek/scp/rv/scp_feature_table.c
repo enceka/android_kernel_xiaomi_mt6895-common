@@ -559,5 +559,10 @@ struct scp_sub_feature_tb sensor_type_table[NUM_SENSOR_TYPE] = {
 		.freq    = 0,
 		.enable  = 0,
 	},
+	{
+		.feature = POCKET_ID,
+		.freq    = 0,
+		.enable  = 0,
+	},
 };
 

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (c) 2019 MediaTek Inc.
-// Copyright (C) 2022 XiaoMi, Inc.
 
 /*****************************************************************************
  *
@@ -333,8 +332,8 @@ static struct SET_PD_BLOCK_INFO_T imgsensor_pd_info[2] = {
 			{0, 8}, {8, 8}, {2, 11}, {10, 11}, {6, 12}, {14, 12}, {4, 15}, {12, 15}
 		},
 		.i4Crop = {
-			{0, 0}, {0, 0}, {0, 430}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0},
-			{0, 430}, {0, 430},
+			{0,0}, {0,0},{0,430},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},
+			{0,430},{0,430},
 		}
 	},
 };
@@ -554,7 +553,8 @@ static void set_shutter_frame_length(struct subdrv_ctx *ctx, kal_uint16 shutter,
 
 	if (shutter & 0xFFFF0000) {
 		Rshift = 6;
-	} else {
+	}
+	else {
 		Rshift = 0;
 	}
 
@@ -1676,7 +1676,7 @@ static int feature_control(
 				imgsensor_info.sensor_output_dataformat;
 			break;
 		}
-		S5KGW1_LOG_DBG("SENSOR_FEATURE_GET_OUTPUT_FORMAT_BY_SCENARIO get:%d\n", *(feature_data + 1));
+		S5KGW1_LOG_DBG("SENSOR_FEATURE_GET_OUTPUT_FORMAT_BY_SCENARIO get:%d\n",*(feature_data + 1));
 	break;
 	case SENSOR_FEATURE_GET_AWB_REQ_BY_SCENARIO:
 		switch (*feature_data) {

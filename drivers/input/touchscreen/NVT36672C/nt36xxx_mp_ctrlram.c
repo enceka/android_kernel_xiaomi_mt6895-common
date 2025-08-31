@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2010 - 2018 Novatek, Inc.
- * Copyright (C) 2022 XiaoMi, Inc.
  *
  * $Revision: 32206 $
  * $Date: 2018-08-10 19:23:04 +0800 (週五, 10 八月 2018) $
@@ -23,7 +22,7 @@
 #include <linux/slab.h>
 #include <asm/uaccess.h>
 #include <linux/firmware.h>
-
+#include <linux/compiler.h>
 #include "nt36xxx.h"
 #include "nt36xxx_mp_ctrlram.h"
 
@@ -53,40 +52,41 @@
 #define NVT_RESULT_FAIL 1
 
 
-static uint8_t *RecordResult_Short;
-static uint8_t *RecordResult_Open;
-static uint8_t *RecordResult_FWMutual;
-static uint8_t *RecordResult_FW_CC;
-static uint8_t *RecordResult_FW_DiffMax;
-static uint8_t *RecordResult_FW_DiffMin;
+static uint8_t *RecordResult_Short = NULL;
+static uint8_t *RecordResult_Open = NULL;
+static uint8_t *RecordResult_FWMutual = NULL;
+static uint8_t *RecordResult_FW_CC = NULL;
+static uint8_t *RecordResult_FW_DiffMax = NULL;
+static uint8_t *RecordResult_FW_DiffMin = NULL;
 
-static int32_t TestResult_Short;
-static int32_t TestResult_Open;
-static int32_t TestResult_FW_Rawdata;
-static int32_t TestResult_FWMutual;
-static int32_t TestResult_FW_CC;
-static int32_t TestResult_Noise;
-static int32_t TestResult_FW_DiffMax;
-static int32_t TestResult_FW_DiffMin;
+static int32_t TestResult_Short = 0;
+static int32_t TestResult_Open = 0;
+static int32_t TestResult_FW_Rawdata = 0;
+static int32_t TestResult_FWMutual = 0;
+static int32_t TestResult_FW_CC = 0;
+static int32_t TestResult_Noise = 0;
+static int32_t TestResult_FW_DiffMax = 0;
+static int32_t TestResult_FW_DiffMin = 0;
 
-static int32_t *RawData_Short;
-static int32_t *RawData_Open;
-static int32_t *RawData_Diff;
-static int32_t *RawData_Diff_Min;
-static int32_t *RawData_Diff_Max;
-static int32_t *RawData_FWMutual;
-static int32_t *RawData_FW_CC;
+static int32_t *RawData_Short = NULL;
+static int32_t *RawData_Open = NULL;
+static int32_t *RawData_Diff = NULL;
+static int32_t *RawData_Diff_Min = NULL;
+static int32_t *RawData_Diff_Max = NULL;
+static int32_t *RawData_FWMutual = NULL;
+static int32_t *RawData_FW_CC = NULL;
 
-static struct proc_dir_entry *NVT_proc_selftest_entry;
+static struct proc_dir_entry *NVT_proc_selftest_entry = NULL;
 static struct proc_dir_entry *NVT_proc_aftersales_test_entry;
 
 
 #ifndef NVT_SAVE_TESTDATA_IN_FILE
-static struct proc_dir_entry *NVT_proc_test_data_entry;
+static struct proc_dir_entry *NVT_proc_test_data_entry = NULL;
 #endif
 
-static int8_t nvt_mp_test_result_printed;
-static uint8_t fw_ver;
+static int8_t nvt_mp_test_result_printed = 0;
+static uint8_t fw_ver = 0;
+static uint16_t nvt_pid = 0;
 
 extern void nvt_change_mode(uint8_t mode);
 extern uint8_t nvt_get_fw_pipe(void);
@@ -369,7 +369,8 @@ void dump_buff(int32_t *rawdata, uint8_t x_ch, uint8_t y_ch)
 {
 	int32_t y = 0;
 
-	for (y = 0; y < y_ch; y++) {
+	for (y = 0; y < y_ch; y++)
+	{
 		nvt_print_data_log_in_one_line(rawdata + y * x_ch, x_ch);
 		NVT_LOG("%s:++\n", __func__);
 	}
@@ -408,7 +409,7 @@ static int32_t nvt_save_rawdata_to_csv(int32_t *rawdata, uint8_t x_ch, uint8_t y
 		}
 		nvt_print_data_log_in_one_line(rawdata + y * x_ch, x_ch);
 		NVT_LOG("\n");
-		sprintf(fbufp + (iArrayIndex + 1) * 7 + y * 2, "\r\n");
+		sprintf(fbufp + (iArrayIndex + 1) * 7 + y * 2,"\r\n");
 	}
 
 	org_fs = get_fs();
@@ -932,7 +933,7 @@ static int32_t nvt_read_fw_short(int32_t *xdata)
 		return -EAGAIN;
 	}
 
-	NVT_LOG("%s --\n", __func__);
+	NVT_LOG("%s --\n",__func__);
 
 	return 0;
 }
@@ -957,10 +958,10 @@ static int32_t RawDataTest_SinglePoint_Sub(int32_t rawdata[], uint8_t RecordResu
 
 			RecordResult[iArrayIndex] = 0x00; /* default value for PASS */
 
-			if (rawdata[iArrayIndex] > Rawdata_Limit_Postive[iArrayIndex])
+			if(rawdata[iArrayIndex] > Rawdata_Limit_Postive[iArrayIndex])
 				RecordResult[iArrayIndex] |= 0x01;
 
-			if (rawdata[iArrayIndex] < Rawdata_Limit_Negative[iArrayIndex])
+			if(rawdata[iArrayIndex] < Rawdata_Limit_Negative[iArrayIndex])
 				RecordResult[iArrayIndex] |= 0x02;
 		}
 	}
@@ -996,37 +997,37 @@ void print_selftest_result(struct seq_file *m, int32_t TestResult, uint8_t Recor
 	int32_t iArrayIndex = 0;
 
 	switch (TestResult) {
-	case 0:
-		nvt_mp_seq_printf(m, " PASS!\n");
-		break;
+		case 0:
+			nvt_mp_seq_printf(m, " PASS!\n");
+			break;
 
-	case 1:
-		nvt_mp_seq_printf(m, " ERROR! Read Data FAIL!\n");
-		break;
+		case 1:
+			nvt_mp_seq_printf(m, " ERROR! Read Data FAIL!\n");
+			break;
 
-	case -1:
-		nvt_mp_seq_printf(m, " FAIL!\n");
-		nvt_mp_seq_printf(m, "RecordResult:\n");
-		for (i = 0; i < y_len; i++) {
-			for (j = 0; j < x_len; j++) {
-				iArrayIndex = i * x_len + j;
-				seq_printf(m, "0x%02X, ", RecordResult[iArrayIndex]);
+		case -1:
+			nvt_mp_seq_printf(m, " FAIL!\n");
+			nvt_mp_seq_printf(m, "RecordResult:\n");
+			for (i = 0; i < y_len; i++) {
+				for (j = 0; j < x_len; j++) {
+					iArrayIndex = i * x_len + j;
+					seq_printf(m, "0x%02X, ", RecordResult[iArrayIndex]);
+				}
+				if (!nvt_mp_test_result_printed)
+					nvt_print_result_log_in_one_line(RecordResult + i * x_len, x_len);
+				nvt_mp_seq_printf(m, "\n");
 			}
-			if (!nvt_mp_test_result_printed)
-				nvt_print_result_log_in_one_line(RecordResult + i * x_len, x_len);
-			nvt_mp_seq_printf(m, "\n");
-		}
-		nvt_mp_seq_printf(m, "ReadData:\n");
-		for (i = 0; i < y_len; i++) {
-			for (j = 0; j < x_len; j++) {
-				iArrayIndex = i * x_len + j;
-				seq_printf(m, "%5d, ", rawdata[iArrayIndex]);
+			nvt_mp_seq_printf(m, "ReadData:\n");
+			for (i = 0; i < y_len; i++) {
+				for (j = 0; j < x_len; j++) {
+					iArrayIndex = i * x_len + j;
+					seq_printf(m, "%5d, ", rawdata[iArrayIndex]);
+				}
+				if (!nvt_mp_test_result_printed)
+					nvt_print_data_log_in_one_line(rawdata + i * x_len, x_len);
+				nvt_mp_seq_printf(m, "\n");
 			}
-			if (!nvt_mp_test_result_printed)
-				nvt_print_data_log_in_one_line(rawdata + i * x_len, x_len);
-			nvt_mp_seq_printf(m, "\n");
-		}
-		break;
+			break;
 	}
 	nvt_mp_seq_printf(m, "\n");
 }
@@ -1044,7 +1045,7 @@ static int32_t c_show_selftest(struct seq_file *m, void *v)
 	NVT_LOG("%s ++\n", __func__);
 
 	nvt_mp_seq_printf(m, "FW Version: %d\n\n", fw_ver);
-
+	nvt_mp_seq_printf(m, "FW Version: %d, NVT PID: 0x%04X\n\n", fw_ver, nvt_pid);
 	nvt_mp_seq_printf(m, "Short Test");
 	if ((TestResult_Short == 0) || (TestResult_Short == 1)) {
 		print_selftest_result(m, TestResult_Short, RecordResult_Short, RawData_Short, X_Channel, Y_Channel);
@@ -1177,7 +1178,7 @@ static void copy_this_line(char *dest, char *src)
 		*copy_to = *copy_from;
 		copy_from++;
 		copy_to++;
-	} while ((*copy_from != '\n') && (*copy_from != '\r'));
+	} while((*copy_from != '\n') && (*copy_from != '\r'));
 	*copy_to = '\0';
 }
 
@@ -1227,7 +1228,7 @@ int32_t parse_mp_setting_ain_array(char **ptr, const char *item_string, uint8_t 
 	offset = strlen(tmp_buf);
 	tok_ptr = tmp_buf;
 	i = 0;
-	while ((token = strsep(&tok_ptr, ", \t\r\0"))) {
+	while ((token = strsep(&tok_ptr,", \t\r\0"))) {
 		if (strlen(token) == 0)
 			continue;
 		if (!strcmp(token, "0xFF") || !strcmp(token, "0xff"))
@@ -1278,7 +1279,7 @@ int32_t parse_mp_criteria_item_array(char **ptr, const char *item_string, int32_
 		offset = strlen(tmp_buf);
 		tok_ptr = tmp_buf;
 		j = 0;
-		while ((token = strsep(&tok_ptr, ", \t\r\0"))) {
+		while ((token = strsep(&tok_ptr,", \t\r\0"))) {
 			if (strlen(token) == 0)
 				continue;
 			item_array[i * X_Channel + j] = (int32_t) simple_strtol(token, NULL, 10);
@@ -1523,6 +1524,7 @@ static int32_t nvt_selftest_open(struct inode *inode, struct file *file)
 		return -EAGAIN;
 	}
 	fw_ver = ts->fw_ver;
+	nvt_pid = ts->nvt_pid;
 #if NVT_TOUCH_MP_SETTING_CRITERIA_FROM_CSV
 	/* ---Check if MP Setting Criteria CSV file exist and load--- */
 	snprintf(mp_setting_criteria_csv_filename, sizeof(mp_setting_criteria_csv_filename), "NT36xxx_MP_Setting_Criteria_%04X.csv", ts->nvt_pid);
@@ -1531,7 +1533,7 @@ static int32_t nvt_selftest_open(struct inode *inode, struct file *file)
 		NVT_ERR("SelfTest MP setting criteria CSV file not exist or load failed\n");
 #endif /* NVT_TOUCH_MP_SETTING_CRITERIA_FROM_CSV */
 		/* Parsing criteria from dts */
-		if (of_property_read_bool(np, "novatek,mp-support-dt")) {
+		if(of_property_read_bool(np, "novatek,mp-support-dt")) {
 			/*
 			 * Parsing Criteria by Novatek PID
 			 * The string rule is "novatek-mp-criteria-<nvt_pid>"
@@ -1670,14 +1672,14 @@ static int32_t nvt_selftest_open(struct inode *inode, struct file *file)
 	return seq_open(file, &nvt_selftest_seq_ops);
 }
 
-#ifdef HAVE_PROC_OPS
-static const struct proc_ops  nvt_selftest_fops = {
-		.proc_open = nvt_selftest_open,
-		.proc_read = seq_read,
-		.proc_lseek = seq_lseek,
-		.proc_release = seq_release,
-};
-#else
+#ifdef HAVE_PROC_OPS                                                            
+static const struct proc_ops  nvt_selftest_fops= {                  
+        .proc_open =  nvt_selftest_open,                             
+        .proc_read =  seq_read,                                                  
+        .proc_lseek = seq_lseek,                                                 
+        .proc_release = seq_release,                                             
+};                                                                              
+#else 
 static const struct file_operations nvt_selftest_fops = {
 	.owner = THIS_MODULE,
 	.open = nvt_selftest_open,
@@ -1919,6 +1921,7 @@ int nvt_short_test(void)
 		return -EAGAIN;
 	}
 	fw_ver = ts->fw_ver;
+	nvt_pid = ts->nvt_pid;
 #if NVT_TOUCH_MP_SETTING_CRITERIA_FROM_CSV
 	/* ---Check if MP Setting Criteria CSV file exist and load--- */
 	snprintf(mp_setting_criteria_csv_filename, sizeof(mp_setting_criteria_csv_filename), "NT36xxx_MP_Setting_Criteria_%04X.csv", ts->nvt_pid);
@@ -2041,6 +2044,7 @@ int nvt_open_test(void)
 		return -EAGAIN;
 	}
 	fw_ver = ts->fw_ver;
+	nvt_pid = ts->nvt_pid;
 #if NVT_TOUCH_MP_SETTING_CRITERIA_FROM_CSV
 	/* ---Check if MP Setting Criteria CSV file exist and load--- */
 	snprintf(mp_setting_criteria_csv_filename, sizeof(mp_setting_criteria_csv_filename), "NT36xxx_MP_Setting_Criteria_%04X.csv", ts->nvt_pid);
@@ -2148,15 +2152,19 @@ static ssize_t nvt_selftest_read(struct file *file, char __user *buf, size_t cou
 static ssize_t nvt_selftest_write(struct file *file, const char __user *buf, size_t count, loff_t *pos)
 {
 	int retval = 0;
-	char tmp[6];
+	char tmp[6] = {'\0'};
 
+	if (unlikely(count > sizeof(tmp))) {
+		retval = -EINVAL;
+		goto out;
+	}
 	if (copy_from_user(tmp, buf, count)) {
 		retval = -EFAULT;
 		goto out;
 	}
 
 	if (!strncmp("short", tmp, 5)) {
-		ts->selftest_done = false;
+		ts-> selftest_done = false;
 		queue_work(ts->selftest_wq, &ts->shorttest_work);
 		wait_event_interruptible(ts->selftest_wait_queue,
 					 ts->selftest_done);
@@ -2193,14 +2201,14 @@ out:
 
 
 #ifdef HAVE_PROC_OPS
-static const struct proc_ops nvt_aftersales_test_ops = {
-		.proc_read =  nvt_selftest_read,
-		.proc_write = nvt_selftest_write,
+static const struct proc_ops  nvt_aftersales_test_ops= {
+        .proc_read =  nvt_selftest_read,
+        .proc_write = nvt_selftest_write,
 };
 #else
 static const struct file_operations nvt_aftersales_test_ops = {
-	.read = nvt_selftest_read,
-	.write = nvt_selftest_write,
+	.read		= nvt_selftest_read,
+	.write		= nvt_selftest_write,
 };
 #endif
 
@@ -2219,10 +2227,11 @@ int32_t nvt_mp_proc_init(void)
 		NVT_ERR("create /proc/nvt_selftest Failed!\n");
 		return -1;
 	} else {
-		if (nvt_mp_buffer_init()) {
+		if(nvt_mp_buffer_init()) {
 			NVT_ERR("Allocate mp memory failed\n");
 			return -1;
-		} else {
+		}
+		else {
 			NVT_LOG("create /proc/nvt_selftest Succeeded!\n");
 		}
 	}
@@ -2260,7 +2269,7 @@ void nvt_mp_proc_deinit(void)
 #ifndef NVT_SAVE_TESTDATA_IN_FILE
 static void test_buff_free(struct test_buf *buf)
 {
-	if (buf) {
+	if(buf) {
 		if (buf->shorttest.buf)
 			kfree(buf->shorttest.buf);
 		if (buf->opentest.buf)
@@ -2399,28 +2408,35 @@ static int32_t t_show(struct seq_file *m, void *v)
 	NVT_LOG("item ptr (%p), type (%d), buf ptr(%p)\n", item, item->type, item->buf);
 
 
-	switch (item->type) {
-	case SHORT_TEST:
-		seq_printf(m, "========SHORT_TEST========\n");
-	break;
-	case OPEN_TEST:
-		seq_printf(m, "========OPEN_TEST========\n");
-	break;
-	case FWMUTUAL_TEST:
-		seq_printf(m, "========FWMUTUAL_TEST========\n");
-	break;
-	case FWCC_TEST:
-		seq_printf(m, "========FWCC_TEST========\n");
-	break;
-	case NOISE_MAX_TEST:
-		seq_printf(m, "========NOISE_MAX_TEST========\n");
-	break;
-	case NOISE_MIN_TEST:
-		seq_printf(m, "========NOISE_MIN_TEST========\n");
-	break;
-	default:
-		NVT_LOG("test type illegal (%d)\n", item->type);
-	return -EINVAL;
+	switch (item->type)
+	{
+		case SHORT_TEST:
+			seq_printf(m, "FW Version: %d, NVT PID: 0x%04X\n\n", fw_ver, nvt_pid);
+			seq_printf(m, "========SHORT_TEST========\n");
+		break;
+		case OPEN_TEST:
+			seq_printf(m, "FW Version: %d, NVT PID: 0x%04X\n\n", fw_ver, nvt_pid);
+			seq_printf(m, "========OPEN_TEST========\n");
+		break;
+		case FWMUTUAL_TEST:
+			seq_printf(m, "FW Version: %d, NVT PID: 0x%04X\n\n", fw_ver, nvt_pid);
+			seq_printf(m, "========FWMUTUAL_TEST========\n");
+		break;
+		case FWCC_TEST:
+			seq_printf(m, "FW Version: %d, NVT PID: 0x%04X\n\n", fw_ver, nvt_pid);
+			seq_printf(m, "========FWCC_TEST========\n");
+		break;
+		case NOISE_MAX_TEST:
+			seq_printf(m, "FW Version: %d, NVT PID: 0x%04X\n\n", fw_ver, nvt_pid);
+			seq_printf(m, "========NOISE_MAX_TEST========\n");
+		break;
+		case NOISE_MIN_TEST:
+			seq_printf(m, "FW Version: %d, NVT PID: 0x%04X\n\n", fw_ver, nvt_pid);
+			seq_printf(m, "========NOISE_MIN_TEST========\n");
+		break;
+		default:
+			NVT_LOG("test type illegal (%d)\n", item->type);
+		return -EINVAL;
 	}
 
 	for (i = 0; i < Y_Channel; i++) {
@@ -2453,13 +2469,13 @@ static int32_t nvt_test_data_open(struct inode *inode, struct file *file)
 	return seq_open(file, &t_fops);
 }
 
-#ifdef HAVE_PROC_OPS
-static const struct  proc_ops   nvt_test_data_fops = {
-		.proc_open =  nvt_test_data_open,
-		.proc_read =  seq_read,
-		.proc_lseek = seq_lseek,
-		.proc_release = seq_release,
-};
+#ifdef HAVE_PROC_OPS                                                            
+static const struct  proc_ops   nvt_test_data_fops = {                  
+        .proc_open =  nvt_test_data_open,                             
+        .proc_read =  seq_read,                                                  
+        .proc_lseek = seq_lseek,                                                 
+        .proc_release = seq_release,                                             
+};                                                                              
 #else
 static const struct file_operations nvt_test_data_fops = {
 	.owner = THIS_MODULE,

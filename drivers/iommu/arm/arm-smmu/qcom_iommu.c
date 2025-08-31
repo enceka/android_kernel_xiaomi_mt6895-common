@@ -4,7 +4,6 @@
  *
  * Copyright (C) 2013 ARM Limited
  * Copyright (C) 2017 Red Hat
- * copyright (C) 2022 XiaoMi, Inc.
  */
 
 #include <linux/atomic.h>
@@ -82,7 +81,7 @@ static struct qcom_iommu_domain *to_qcom_iommu_domain(struct iommu_domain *dom)
 
 static const struct iommu_ops qcom_iommu_ops;
 
-static struct qcom_iommu_dev *to_iommu(struct device *dev)
+static struct qcom_iommu_dev * to_iommu(struct device *dev)
 {
 	struct iommu_fwspec *fwspec = dev_iommu_fwspec_get(dev);
 
@@ -92,7 +91,7 @@ static struct qcom_iommu_dev *to_iommu(struct device *dev)
 	return dev_iommu_priv_get(dev);
 }
 
-static struct qcom_iommu_ctx *to_ctx(struct qcom_iommu_domain *d, unsigned asid)
+static struct qcom_iommu_ctx * to_ctx(struct qcom_iommu_domain *d, unsigned asid)
 {
 	struct qcom_iommu_dev *qcom_iommu = d->iommu;
 	if (!qcom_iommu)
@@ -623,7 +622,7 @@ static int qcom_iommu_sec_ptbl_init(struct device *dev)
 	void *cpu_addr;
 	dma_addr_t paddr;
 	unsigned long attrs;
-	static bool allocated;
+	static bool allocated = false;
 	int ret;
 
 	if (allocated)

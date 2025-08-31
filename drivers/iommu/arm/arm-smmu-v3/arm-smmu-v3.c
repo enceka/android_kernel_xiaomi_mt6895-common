@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * IOMMU API for ARM architected SMMUv3 implementations.
- * 
+ *
  * Copyright (C) 2015 ARM Limited
- * Copyright (C) 2022 XiaoMi, Inc.
+ *
  * Author: Will Deacon <will.deacon@arm.com>
  *
  * This driver is powered by bad coffee and bombay mix.
@@ -1368,6 +1368,7 @@ static irqreturn_t arm_smmu_evtq_thread(int irq, void *dev)
 				dev_info(smmu->dev, "\t0x%016llx\n",
 					 (unsigned long long)evt[i]);
 
+			cond_resched();
 		}
 
 		/*
@@ -2459,7 +2460,7 @@ static int arm_smmu_domain_set_attr(struct iommu_domain *domain,
 		}
 		break;
 	case IOMMU_DOMAIN_DMA:
-		switch (attr) {
+		switch(attr) {
 		case DOMAIN_ATTR_DMA_USE_FLUSH_QUEUE:
 			smmu_domain->non_strict = *(int *)data;
 			break;
@@ -3504,6 +3505,8 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
 
 	/* Base address */
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!res)
+		return -EINVAL;
 	if (resource_size(res) < arm_smmu_resource_size(smmu)) {
 		dev_err(dev, "MMIO region too small (%pr)\n", res);
 		return -EINVAL;

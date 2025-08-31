@@ -334,25 +334,7 @@ static ssize_t adapter_pd_id_show(struct device *dev, struct device_attribute *a
 
 static ssize_t adapter_pd_authenticate_process_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t size)
 {
-	struct charge_chip *chip = dev_get_drvdata(dev);
-	int value = 0;
-
-	if (sscanf(buf, "%d\n", &value) != 1) {
-		chip->adapter.authenticate_process = 0;
-		return size;
-	}
-
-	chip->adapter.authenticate_process = !!value;
-	xmc_info("[XMC_AUTH] process = %d\n", chip->adapter.authenticate_process);
-
 	return size;
-}
-
-static ssize_t adapter_pd_authenticate_process_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	struct charge_chip *chip = dev_get_drvdata(dev);
-
-	return snprintf(buf, PAGE_SIZE, "%d\n", chip->adapter.authenticate_process);
 }
 
 static ssize_t adapter_pd_authenticate_success_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t size)
@@ -366,11 +348,16 @@ static ssize_t adapter_pd_authenticate_success_store(struct device *dev, struct 
 	}
 
 	chip->adapter.authenticate_success = !!value;
+	chip->adapter.authenticate_done = true;
 	xmc_info("[XMC_AUTH] result = %d\n", chip->adapter.authenticate_success);
 	tcpm_dpm_pd_get_source_cap(chip->tcpc_dev, NULL);
+	xmc_ops_get_cap(chip->adapter_dev, &chip->adapter.cap);
 
-	if (chip->adapter.authenticate_success)
+	if (chip->adapter.authenticate_success || chip->usb_typec.pd_type == XMC_PD_TYPE_PPS) {
 		power_supply_changed(chip->usb_psy);
+		xmc_sysfs_report_uevent(chip->usb_psy);
+		xmc_sysfs_report_uevent(chip->bms_psy);
+	}
 
 	return size;
 }
@@ -387,7 +374,7 @@ static DEVICE_ATTR(pd_current_pr, S_IRUGO, adapter_pd_current_pr_show, NULL);
 static DEVICE_ATTR(pd_current_state, S_IRUGO, adapter_pd_current_state_show, NULL);
 static DEVICE_ATTR(pd_svid, S_IRUGO, adapter_pd_svid_show, NULL);
 static DEVICE_ATTR(pd_id, S_IRUGO, adapter_pd_id_show, NULL);
-static DEVICE_ATTR(pd_authenticate_process, S_IRUGO | S_IWUSR, adapter_pd_authenticate_process_show, adapter_pd_authenticate_process_store);
+static DEVICE_ATTR(pd_authenticate_process, S_IWUSR, NULL, adapter_pd_authenticate_process_store);
 static DEVICE_ATTR(pd_authenticate_success, S_IRUGO | S_IWUSR, adapter_pd_authenticate_success_show, adapter_pd_authenticate_success_store);
 
 static struct attribute *adapter_attributes[] = {
@@ -513,87 +500,50 @@ static int adapter_set_cap(struct xmc_device *dev, enum xmc_pdo_type type, int m
 	return ret;
 }
 
-static int adapter_get_cap(struct xmc_device *dev, enum xmc_pdo_type type, struct xmc_pd_cap *tacap)
+static int adapter_filter_apdo_max(struct charge_chip *chip, int apdo_max)
+{
+	if (apdo_max >= 110 && apdo_max < 130 )
+		return 120;
+	else if (apdo_max >= 96 && apdo_max < 110 )
+		return 100;
+	else if (apdo_max >= 66 && apdo_max < 96)
+		return 67;
+	else if (apdo_max >= 65 && apdo_max < 66)
+		return 65;
+	else if (apdo_max > 50 && apdo_max < 65)
+		return 55;
+	else if (apdo_max == 50)
+		return 50;
+	else if (apdo_max >= 30)
+		return 33;
+	else
+		return 0;
+}
+
+static int adapter_get_cap(struct xmc_device *dev, struct xmc_pd_cap *tacap)
 {
 	struct charge_chip *chip = (struct charge_chip *)xmc_ops_get_data(dev);
-	struct tcpm_power_cap_val apdo_cap;
 	struct tcpm_remote_power_cap pd_cap;
-	struct pd_source_cap_ext cap_ext;
-	uint8_t cap_i = 0;
-	int ret = 0, idx = 0;
-	unsigned int i = 0;
+	int apdo_max = 0, ret = 0, i = 0;
 
-	if (type == XMC_PDO_APDO) {
-		while (1) {
-			ret = tcpm_inquire_pd_source_apdo(chip->tcpc_dev,
-					TCPM_POWER_CAP_APDO_TYPE_PPS,
-					&cap_i, &apdo_cap);
-			if (ret == TCPM_ERROR_NOT_FOUND) {
-				break;
-			} else if (ret != TCPM_SUCCESS) {
-				xmc_info("[%s] tcpm_inquire_pd_source_apdo failed(%d)\n",
-					__func__, ret);
-				break;
-			}
-
-			ret = tcpm_dpm_pd_get_source_cap_ext(chip->tcpc_dev,
-					NULL, &cap_ext);
-			if (ret == TCPM_SUCCESS)
-				tacap->pdp = cap_ext.source_pdp;
-			else {
-				tacap->pdp = 0;
-				xmc_info("[%s] tcpm_dpm_pd_get_source_cap_ext failed(%d)\n",
-					__func__, ret);
-			}
-
-			tacap->pwr_limit[idx] = apdo_cap.pwr_limit;
-			/* If TA has PDP, we set pwr_limit as true */
-			if (tacap->pdp > 0 && !tacap->pwr_limit[idx])
-				tacap->pwr_limit[idx] = 1;
-			tacap->ma[idx] = apdo_cap.ma;
-			tacap->max_mv[idx] = apdo_cap.max_mv;
-			tacap->min_mv[idx] = apdo_cap.min_mv;
-			tacap->maxwatt[idx] = apdo_cap.max_mv * apdo_cap.ma;
-			tacap->minwatt[idx] = apdo_cap.min_mv * apdo_cap.ma;
-			tacap->type[idx] = XMC_PDO_APDO;
-
-			idx++;
-			xmc_info("pps_boundary[%d], %d mv ~ %d mv, %d ma pl:%d\n",
-				cap_i,
-				apdo_cap.min_mv, apdo_cap.max_mv,
-				apdo_cap.ma, apdo_cap.pwr_limit);
-			if (idx >= ADAPTER_CAP_MAX_NR) {
-				xmc_info("CAP NR > %d\n", ADAPTER_CAP_MAX_NR);
-				break;
-			}
-		}
-		tacap->nr = idx;
-
-		for (i = 0; i < tacap->nr; i++) {
-			xmc_info("pps_cap[%d:%d], %d mv ~ %d mv, %d ma pl:%d pdp:%d\n",
-				i, (int)tacap->nr, tacap->min_mv[i],
-				tacap->max_mv[i], tacap->ma[i],
-				tacap->pwr_limit[i], tacap->pdp);
-		}
-
-		if (cap_i == 0)
-			xmc_info("no APDO for pps\n");
-
-	} else if (type == XMC_PDO_PD) {
-		pd_cap.nr = 0;
-		ret = tcpm_get_remote_power_cap(chip->tcpc_dev, &pd_cap);
-		if (pd_cap.nr != 0) {
-			tacap->nr = pd_cap.nr;
-			for (i = 0; i < pd_cap.nr; i++) {
-				tacap->ma[i] = pd_cap.ma[i];
-				tacap->max_mv[i] = pd_cap.max_mv[i];
-				tacap->min_mv[i] = pd_cap.min_mv[i];
-				tacap->maxwatt[i] = tacap->max_mv[i] * tacap->ma[i];
-				tacap->type[i] = pd_cap.type[i];
-			}
+	pd_cap.nr = 0;
+	ret = tcpm_get_remote_power_cap(chip->tcpc_dev, &pd_cap);
+	if (pd_cap.nr != 0) {
+		tacap->nr = pd_cap.nr;
+		for (i = 0; i < pd_cap.nr; i++) {
+			tacap->ma[i] = pd_cap.ma[i];
+			tacap->max_mv[i] = pd_cap.max_mv[i];
+			tacap->min_mv[i] = pd_cap.min_mv[i];
+			tacap->type[i] = pd_cap.type[i];
+			tacap->maxwatt[i] = tacap->max_mv[i] * tacap->ma[i] / 1000000;
+			xmc_info("[XMC_PDM] type = %d, max_mv = %d, min_mv = %d, ma = %d, watt = %d\n", tacap->type[i],
+				tacap->max_mv[i], tacap->min_mv[i], tacap->ma[i], tacap->maxwatt[i]);
+			if (tacap->type[i] == TCPM_POWER_CAP_VAL_TYPE_AUGMENT && tacap->maxwatt[i] > apdo_max)
+				apdo_max = tacap->maxwatt[i];
 		}
 	}
 
+	chip->adapter.apdo_max = adapter_filter_apdo_max(chip, apdo_max);
 	return ret;
 }
 

@@ -66,7 +66,8 @@ static int mi_cooler_brightness_clone_set_cur_state(
 	dsi->mi_cfg.thermal_state = state;
 	mi_dsi_display_get_max_brightness_clone(dsi, &max_brightness_clone);
 	thermal_limit_brightness_clone = max_brightness_clone * state / MAX_THERMAL_STATE;
-	mi_dsi_display_set_thermal_limit_brightness_clone(dsi, thermal_limit_brightness_clone);
+	//mi_dsi_display_set_thermal_limit_brightness_clone(dsi, thermal_limit_brightness_clone);
+        sysfs_notify(&cdev->device.kobj, NULL, "cur_state");
 
 	mi_cooler_brightness_clone_dprintk("%s: %d\n", __func__, state);
 

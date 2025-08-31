@@ -20,8 +20,10 @@
 #define TYPEC_BURN_VOTER	"TYPEC_BURN_VOTER"
 #define SIC_VOTER		"SIC_VOTER"
 #define FG_I2C_VOTER	        "FG_I2C_VOTER"
+#define MAIN_CON_ERR_VOTER	     "MAIN_CON_ERR_VOTER"
 #define ICL_VOTER		"ICL_VOTER"
-
+#define FV_DIFF_VOTER		"FV_DIFF_VOTER"
+#define FV_DEC_VOTER		"FV_DEC_VOTER"
 
 struct votable;
 

@@ -218,6 +218,8 @@ struct dpmaif_rx_queue {
 	unsigned short    pit_rel_rd_idx;
 	unsigned int reg_int_mask_bak;
 
+	unsigned int    pit_seq;
+
 	struct tasklet_struct dpmaif_rxq0_task;
 	wait_queue_head_t rx_wq;
 	struct task_struct *rx_thread;

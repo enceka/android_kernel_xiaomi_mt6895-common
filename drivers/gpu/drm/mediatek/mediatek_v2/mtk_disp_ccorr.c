@@ -75,7 +75,7 @@ unsigned int disp_ccorr_linear;
 bool disp_aosp_ccorr;
 static bool g_prim_ccorr_force_linear;
 static bool g_prim_ccorr_pq_nonlinear;
-
+static bool g_zero_backlight = false;
 #define index_of_ccorr(module) ((module == DDP_COMPONENT_CCORR0) ? 0 : \
 		((module == DDP_COMPONENT_CCORR1) ? 1 : \
 		((module == DDP_COMPONENT_CCORR2) ? 2 : 3)))
@@ -627,7 +627,8 @@ void disp_pq_notify_backlight_changed(int bl_1024)
 #if CONFIG_MI_DISP
 	mi_disp_feature_event_notify_by_type(mi_get_disp_id("primary"), MI_DISP_EVENT_BACKLIGHT, sizeof(bl_1024), bl_1024);
 #endif
-	if (m_new_pq_persist_property[DISP_PQ_CCORR_SILKY_BRIGHTNESS]) {
+	if (m_new_pq_persist_property[DISP_PQ_CCORR_SILKY_BRIGHTNESS] ||
+		 m_new_pq_persist_property[DISP_PQ_MI_SOFT_BRIGHTNESS]) {
 		DDPINFO("[mtk_debug] g_ccorr_relay_value = %d\n", g_ccorr_relay_value[index_of_ccorr(default_comp->id)]);
 		if (default_comp != NULL &&
 			g_ccorr_relay_value[index_of_ccorr(default_comp->id)] != 1) {
@@ -1000,7 +1001,7 @@ int mtk_drm_ioctl_set_ccorr(struct drm_device *dev, void *data,
 		}
 
 		if ((ccorr_config->silky_bright_flag) == 1 &&
-			ccorr_config->FinalBacklight != 0) {
+			ccorr_config->FinalBacklight != 0 && !g_zero_backlight) {
 			DDPINFO("brightness = %d, silky_bright_flag = %d",
 				ccorr_config->FinalBacklight,
 				ccorr_config->silky_bright_flag);
@@ -1012,7 +1013,10 @@ int mtk_drm_ioctl_set_ccorr(struct drm_device *dev, void *data,
 			if (dc_changed && dc_status) {
 				mtk_leds_brightness_set("lcd-backlight", ccorr_config->FinalBacklight);
 				if (crc_config->brightness < crc_config->dc_threshold) {
-					mtk_ddp_comp_io_cmd(out_comp, NULL, MI_SET_DC_CRC_BL_PACK, crc_config);
+					//mtk_ddp_comp_io_cmd(out_comp, NULL, MI_SET_DC_CRC_BL_PACK, crc_config);
+					crc_config->brightness = ccorr_config->dcthreshold;
+					mtk_ddp_comp_io_cmd(out_comp, NULL, MI_SET_DC_BACKLIGHT, crc_config);
+					crc_config->brightness = ccorr_config->FinalBacklight;
 					mtk_ddp_comp_io_cmd(out_comp, NULL, MI_SET_DC_CRC, crc_config);
 				}
 			/* DC->normal */
@@ -1079,13 +1083,17 @@ int led_brightness_changed_event_to_pq(struct notifier_block *nb, unsigned long 
 	switch (event) {
 	case LED_BRIGHTNESS_CHANGED:
 		trans_level = led_conf->cdev.brightness;
-
+		if (0 == trans_level)
+			g_zero_backlight = true;
+		else
+			g_zero_backlight = false;
 		disp_pq_notify_backlight_changed(trans_level);
 		DDPINFO("%s: brightness changed: %d(%d)\n",
 			__func__, trans_level, led_conf->cdev.brightness);
 		break;
 	case LED_STATUS_SHUTDOWN:
 		disp_pq_notify_backlight_changed(0);
+		g_zero_backlight = true;
 		break;
 	default:
 		break;

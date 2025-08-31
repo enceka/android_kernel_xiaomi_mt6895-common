@@ -9,11 +9,12 @@
 #include <drm/drm_panel.h>
 #include <drm/drm_modes.h>
 #include <drm/mediatek_drm.h>
+#include <uapi/drm/mi_disp.h>
 
 #define RT_MAX_NUM 10
 #define ESD_CHECK_NUM 3
-#define MAX_TX_CMD_NUM 20
-#define MAX_RX_CMD_NUM 20
+#define MAX_TX_CMD_NUM 25
+#define MAX_RX_CMD_NUM 25
 #define READ_DDIC_SLOT_NUM 4
 #define MAX_DYN_CMD_NUM 20
 
@@ -180,23 +181,6 @@ enum SPR_COLOR_PARAMS_TYPE {
 	SPR_COLOR_PARAMS_TYPE_NUM,
 };
 
-/* feature_id: DISP_FEATURE_LOCAL_HBM corresponding feature_val */
-enum local_hbm_state {
-	LOCAL_HBM_OFF_TO_NORMAL = 0,
-	LOCAL_HBM_NORMAL_WHITE_1000NIT = 1,
-	LOCAL_HBM_NORMAL_WHITE_750NIT = 2,
-	LOCAL_HBM_NORMAL_WHITE_500NIT = 3,
-	LOCAL_HBM_NORMAL_WHITE_110NIT = 4,
-	LOCAL_HBM_NORMAL_GREEN_500NIT = 5,
-	LOCAL_HBM_HLPM_WHITE_1000NIT = 6,
-	LOCAL_HBM_HLPM_WHITE_110NIT = 7,
-	LOCAL_HBM_OFF_TO_HLPM = 8,
-	LOCAL_HBM_OFF_TO_LLPM = 9,
-	LOCAL_HBM_OFF_TO_NORMAL_BACKLIGHT = 10,
-	LOCAL_HBM_OFF_TO_NORMAL_BACKLIGHT_RESTORE = 11,
-	LOCAL_HBM_MAX,
-};
-
 struct spr_color_params {
 	enum SPR_COLOR_PARAMS_TYPE spr_color_params_type;
 	unsigned int count;
@@ -276,6 +260,7 @@ struct mtk_panel_dsc_params {
 	unsigned int rc_quant_incr_limit1;
 	unsigned int rc_tgt_offset_hi;
 	unsigned int rc_tgt_offset_lo;
+	unsigned int dsc_config_panel_name;
 };
 struct mtk_dsi_phy_timcon {
 	unsigned int hs_trail;
@@ -575,14 +560,25 @@ struct mtk_panel_funcs {
 	int (*send_ddic_cmd_pack)(struct drm_panel *panel,
 		void *dsi_drv, dcs_write_gce_pack cb, void *handle);
 #ifdef CONFIG_MI_DISP
+#ifdef CONFIG_MI_DISP_ESD_CHECK
+	void (*esd_restore_backlight)(struct drm_panel *panel);
+	int (*esd_check_read_prepare)(struct drm_panel *panel);
+#else
 	void (*esd_restore_backlight)(struct drm_panel *panel,
 		void *dsi_drv, dcs_write_gce cb, void *handle);
+#endif
+	/* power-on for vddi */
+	int (*panel_poweron)(struct drm_panel *panel);
+
+	/* power-off for vddi */
+	int (*panel_poweroff)(struct drm_panel *panel);
+
 	bool (*get_panel_initialized)(struct drm_panel *panel);
 	int (*get_panel_info)(struct drm_panel *panel, char *buf);
 	int (*set_backlight_i2c)(struct drm_panel *panel, unsigned int level);
 	int (*led_i2c_reg_op)(char *buffer, int op, int count);
 	int (*hbm_fod_control)(struct drm_panel *panel, bool en);
-	int (*set_lhbm_fod)(struct drm_panel *panel, enum local_hbm_state);
+	int (*set_lhbm_fod)(struct mtk_dsi *dsi, enum local_hbm_state);
 	int (*normal_hbm_control)(struct drm_panel *panel, uint32_t level);
 	int (*setbacklight_control)(struct drm_panel *panel, unsigned int level);
 	int (*set_doze_brightness)(struct drm_panel *panel, int doze_brightness);
@@ -611,6 +607,7 @@ struct mtk_panel_funcs {
 	int (*panel_pwm_demura_gain_update)(struct drm_panel *panel, int high_brightness);
 	struct mtk_ddic_dsi_msg* (*get_esd_check_read_prepare_cmdmesg)(void);
 	int (*get_panel_max_brightness_clone)(struct drm_panel *panel, u32 *max_brightness_clone);
+	int (*get_panel_factory_max_brightness)(struct drm_panel *panel, u32 *max_brightness_clone);
 	int (*panel_set_gir_on)(struct drm_panel *panel);
 	int (*panel_set_gir_off)(struct drm_panel *panel);
 	int (*panel_get_gir_status)(struct drm_panel *panel);
@@ -622,12 +619,16 @@ struct mtk_panel_funcs {
 	void (*init)(struct drm_panel *panel);
 	int (*trigger_get_wpinfo)(struct drm_panel *panel, char *buf, size_t size);
 	int (*get_wp_info)(struct drm_panel *panel, char *buf, size_t size);
+	int (*get_grayscale_info)(struct drm_panel *panel, char *buf, size_t size);
 	int (*set_spr_status)(struct drm_panel *panel, int status);
 	int (*panel_set_dc_crc)(struct drm_panel *panel, int hw_brightness_evel, int crc_coef0, int crc_coef1);
 	int (*panel_set_dc_crc_bl_pack)(struct drm_panel *panel, int hw_brightness_evel, int crc_coef0, int crc_coef1);
 	int (*panel_set_dc_crc_off)(struct drm_panel *panel);
 	int (*panel_restore_crc_level)(struct drm_panel *panel, bool need_lock);
 	void (*set_dc_threshold)(struct drm_panel *panel, int dc_threshold);
+	int (*panel_fod_lhbm_init)(struct mtk_dsi * dsi);
+	int (*doze_suspend)(struct drm_panel *panel, void *dsi_drv, dcs_write_gce cb, void *handle);
+	int (*fod_state_check)(void *dsi_drv, dcs_write_gce cb, void *handle);
 #endif
 };
 

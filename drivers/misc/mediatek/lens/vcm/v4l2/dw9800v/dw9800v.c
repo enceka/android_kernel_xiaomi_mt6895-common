@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (c) 2019 MediaTek Inc.
-// Copyright (C) 2022 XiaoMi, Inc.
+
 #include <linux/delay.h>
 #include <linux/i2c.h>
 #include <linux/module.h>
@@ -14,7 +14,11 @@
 #define DRIVER_NAME "dw9800v"
 #define DW9800V_I2C_SLAVE_ADDR 0x18
 #define AK7314_I2C_SLAVE_ADDR  0x18
+#if defined(ARISTOTLE_CAM)
+#define EEPROM_I2C_SLAVE_ADDR	0xA8
+#else
 #define EEPROM_I2C_SLAVE_ADDR  0xA2
+#endif
 
 
 #define LOG_INF(format, args...)                                               \
@@ -56,7 +60,7 @@ struct dw9800v_device {
 	struct pinctrl_state *vcamaf_off;
 };
 
-static int g_vendor_id;
+static int g_vendor_id = 0;
 
 static int read_vendor_id(struct i2c_client *client, u16 a_u2Addr)
 {
@@ -105,26 +109,26 @@ struct regval_list {
 static int dw9800v_set_position(struct dw9800v_device *dw9800v, u16 val)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&dw9800v->sd);
-	int dac_addr   = (g_vendor_id == 0x03/*semco*/) ?\
+	int dac_addr   = DW9800V_SET_POSITION_ADDR;
+	int data_shift = 0;
+#if (defined (MATISSE_CAM) || defined (PLATO_CAM))
+	dac_addr   = (g_vendor_id == 0x03/*semco*/) ?\
 		AK7314_SET_POSITION_ADDR : DW9800V_SET_POSITION_ADDR;
-	int data_shift = (g_vendor_id == 0x03/*semco*/) ? 6 : 0;
-
+	data_shift = (g_vendor_id == 0x03/*semco*/) ? 6 : 0;
+#endif
 	return i2c_smbus_write_word_data(client, dac_addr, swab16(val << data_shift));
 }
 
 static int dw9800v_release(struct dw9800v_device *dw9800v)
 {
-#if defined(XAGA_CAM)
 	int timeout;
-#endif
 	int ret, val;
 	struct i2c_client *client = v4l2_get_subdevdata(&dw9800v->sd);
 
-#if defined(XAGA_CAM)
 	timeout = 0;
 	val = round_down(dw9800v->focus->val, DW9800V_MOVE_STEPS);
-	while (val != DW9800V_INIT_FOCUS_POS) {
-		(val > DW9800V_INIT_FOCUS_POS)?(val -= DW9800V_MOVE_STEPS):(val += DW9800V_MOVE_STEPS);
+	while (val != DW9800V_INIT_FOCUS_POS ) {
+		(val > DW9800V_INIT_FOCUS_POS)?(val -= DW9800V_MOVE_STEPS ):(val += DW9800V_MOVE_STEPS);
 		ret = dw9800v_set_position(dw9800v, val);
 		if (ret) {
 			LOG_INF("%s I2C failure: %d",
@@ -136,23 +140,10 @@ static int dw9800v_release(struct dw9800v_device *dw9800v)
 
 		if (timeout > DW9800V_INIT_FOCUS_POS/DW9800V_MOVE_STEPS) {
 			break;
-		} else {
+                } else {
 			timeout++;
-		}
+                }
 	}
-#else
-	for (val = round_down(dw9800v->focus->val, DW9800V_MOVE_STEPS);
-	     val >= 0; val -= DW9800V_MOVE_STEPS) {
-		ret = dw9800v_set_position(dw9800v, val);
-		if (ret) {
-			LOG_INF("%s I2C failure: %d",
-				__func__, ret);
-			return ret;
-		}
-		usleep_range(DW9800V_MOVE_DELAY_US,
-			     DW9800V_MOVE_DELAY_US + 1000);
-	}
-#endif
 
 	i2c_smbus_write_byte_data(client, 0x02, 0x20);
 	msleep(20);
@@ -173,29 +164,11 @@ static int dw9800v_init(struct dw9800v_device *dw9800v)
 	int ret = 0;
 	int i = 0;
 	unsigned char cmd_number = 7;
-#if defined(MATISSE_CAM)
-	char puSendCmdArray[8][2] = {
-	{0x02, 0x01}, {0x02, 0x00}, {0xFE, 0xFE},
-	{0x02, 0x02}, {0x06, 0x40}, {0x07, 0x07}, {0x10, 0x01}, {0xFE, 0xFE},
-	};
-	cmd_number = 8;
-#elif defined(RUBENS_CAM)
-	char puSendCmdArray[7][2] = {
-	{0x02, 0x01}, {0x02, 0x00}, {0xFE, 0xFE},
-	{0x02, 0x02}, {0x06, 0x40}, {0x07, 0x01}, {0xFE, 0xFE},
-	};
-#elif defined(XAGA_CAM)
 	char puSendCmdArray[8][2] = {
 	{0x02, 0x01}, {0x02, 0x00}, {0xFE, 0xFE},
 	{0x02, 0x02}, {0x06, 0x40}, {0x07, 0x07}, {0x10, 0x00}, {0xFE, 0xFE},
 	};
 	cmd_number = 8;
-#else
-	char puSendCmdArray[7][2] = {
-	{0x02, 0x01}, {0x02, 0x00}, {0xFE, 0xFE},
-	{0x02, 0x02}, {0x06, 0x80}, {0x07, 0x7C}, {0xFE, 0xFE},
-	};
-#endif
 
 	LOG_INF("+\n");
 
@@ -224,7 +197,7 @@ static int dw9800v_init(struct dw9800v_device *dw9800v)
 	return ret;
 }
 
-#ifdef MATISSE_CAM
+#if (defined (MATISSE_CAM) || defined (PLATO_CAM))
 static int ak7314_init(struct dw9800v_device *dw9800v)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&dw9800v->sd);
@@ -303,7 +276,7 @@ static int dw9800v_power_on(struct dw9800v_device *dw9800v)
 	g_vendor_id = read_vendor_id(client, 0x01);
 	LOG_INF("vendor id: %x\n", g_vendor_id);
 
-#ifdef MATISSE_CAM
+#if (defined (MATISSE_CAM) || defined (PLATO_CAM))
 	client->addr = DW9800V_I2C_SLAVE_ADDR >> 1;
 	ret = i2c_smbus_read_byte_data(client, 0x00);
 
@@ -436,11 +409,7 @@ static int dw9800v_probe(struct i2c_client *client)
 		return ret;
 	}
 
-#if defined(XAGA_CAM)
 	dw9800v->vdd = devm_regulator_get(dev, "fan53870-l6");
-#else
-	dw9800v->vdd = devm_regulator_get(dev, "vdd");
-#endif
 	if (IS_ERR(dw9800v->vdd)) {
 		ret = PTR_ERR(dw9800v->vdd);
 		if (ret != -EPROBE_DEFER)

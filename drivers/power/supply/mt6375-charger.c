@@ -21,9 +21,12 @@
 #include <linux/regmap.h>
 #include <linux/regulator/driver.h>
 #include <linux/workqueue.h>
+#include <linux/reboot.h>
+#include <linux/reboot-mode.h>
 
 #include "charger_class.h"
 #include "mtk_charger.h"
+#include "mtk_battery.h"
 
 static bool dbg_log_en;
 module_param(dbg_log_en, bool, 0644);
@@ -162,19 +165,19 @@ enum mt6375_chg_reg_field {
 	F_MAX,
 };
 
-enum {
-	CHG_STAT_SLEEP,
-	CHG_STAT_VBUS_RDY,
-	CHG_STAT_TRICKLE,
-	CHG_STAT_PRE,
-	CHG_STAT_FAST,
-	CHG_STAT_EOC,
-	CHG_STAT_BKGND,
-	CHG_STAT_DONE,
-	CHG_STAT_FAULT,
-	CHG_STAT_OTG = 15,
-	CHG_STAT_MAX,
-};
+// enum {
+// 	CHG_STAT_SLEEP,
+// 	CHG_STAT_VBUS_RDY,
+// 	CHG_STAT_TRICKLE,
+// 	CHG_STAT_PRE,
+// 	CHG_STAT_FAST,
+// 	CHG_STAT_EOC,
+// 	CHG_STAT_BKGND,
+// 	CHG_STAT_DONE,
+// 	CHG_STAT_FAULT,
+// 	CHG_STAT_OTG = 15,
+// 	CHG_STAT_MAX,
+// };
 
 enum {
 	PORT_STAT_NOINFO,
@@ -232,6 +235,7 @@ struct mt6375_chg_data {
 	struct completion pe_done;
 	struct completion aicc_done;
 	struct charger_device *chgdev;
+        struct  notifier_block reboot_notifier;
 
 	enum power_supply_usb_type psy_usb_type;
 	bool pwr_rdy;
@@ -602,7 +606,7 @@ static void mt6375_set_dpdm_voltage(struct mt6375_chg_data *ddata, int vdp, int 
 	};
 		ret = power_supply_get_property(ddata->psy,
 				POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT, &val);
-		dev_info(ddata->dev, "input_current_limit %d\n", val.intval);
+		dev_info(ddata->dev, "aicr input_current_limit %d\n", val.intval);
 	/* turn on usb dp/dm to setting */
 	for (i = 0; i < ARRAY_SIZE(settings); i++) {
 		ret = mt6375_chg_field_set(ddata, settings[i].fd,
@@ -722,10 +726,8 @@ static int mt6375_chg_regulator_enable(struct regulator_dev *rdev)
 {
 	int ret;
 	struct mt6375_chg_data *ddata = rdev->reg_data;
-
 	if (mt6375_chg_is_usb_killer(ddata))
 		return -EIO;
-
 	ret = mt6375_set_boost_param(ddata, true);
 	if (ret < 0)
 		return ret;
@@ -798,7 +800,7 @@ static const struct mt6375_chg_platform_data mt6375_chg_pdata_def = {
 	.chg_tmr = 10,	/* hr */
 	.dcdt_sel = 600,
 	.wdt_en = false,
-	.te_en = true,
+	.te_en = false,
 	.chg_tmr_en = true,
 	.chg_name = "primary_chg",
 	.usb_killer_detect = false,
@@ -901,6 +903,17 @@ static int mt6375_chg_is_charge_done(struct mt6375_chg_data *ddata, bool *done)
 	if (ret < 0)
 		return ret;
 	*done = (val.intval == POWER_SUPPLY_STATUS_FULL);
+	return 0;
+}
+	
+static int mt6375_get_charge_ic_stat(struct charger_device *chgdev, u32 *stat)
+{
+	struct mt6375_chg_data *ddata = charger_get_data(chgdev);
+	int ret;
+
+	ret = mt6375_chg_field_get(ddata, F_IC_STAT, stat);
+	if (ret < 0)
+		return ret;
 	return 0;
 }
 
@@ -1073,7 +1086,8 @@ static void mt6375_rerun_bc12_work(struct work_struct *work)
 	if (get_pd_usb_connected())
 		return;
 
-	if (ddata->psy_desc.type == POWER_SUPPLY_TYPE_USB_CDP && ddata->psy_usb_type == POWER_SUPPLY_USB_TYPE_DCP) {
+	if ((ddata->psy_desc.type == POWER_SUPPLY_TYPE_USB_CDP && ddata->psy_usb_type == POWER_SUPPLY_USB_TYPE_DCP)
+            || (ddata->psy_desc.type == POWER_SUPPLY_TYPE_USB && ddata->psy_usb_type == POWER_SUPPLY_USB_TYPE_SDP)) {
 		ret = mt6375_chg_enable_bc12(ddata, true);
 		if (ret < 0)
 			dev_err(ddata->dev, "[MT6375_CHG]rerun BC1.2\n");
@@ -1194,6 +1208,11 @@ static void mt6375_chg_bc12_work_func(struct work_struct *work)
 		case PORT_STAT_SDP:
 			ddata->psy_desc.type = POWER_SUPPLY_TYPE_USB;
 			ddata->psy_usb_type = POWER_SUPPLY_USB_TYPE_SDP;
+			if (ddata->recheck_count <= 4) {
+				ddata->recheck_count++;
+				dev_err(ddata->dev, "%s: [MT6375_CHG]rerun BC1.2 recheck_count= %d\n", __func__,ddata->recheck_count);
+				schedule_delayed_work(&ddata->rerun_bc12_work, msecs_to_jiffies(100));
+			}
 			break;
 		case PORT_STAT_CDP:
 			ddata->psy_desc.type = POWER_SUPPLY_TYPE_USB_CDP;
@@ -1418,9 +1437,15 @@ static int mt6375_chg_set_property(struct power_supply *psy,
 		ret = mt6375_chg_set_cv(ddata, val->intval);
 		break;
 	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
-		mutex_lock(&ddata->pe_lock);
-		ret = mt6375_chg_field_set(ddata, F_IAICR, val->intval);
-		mutex_unlock(&ddata->pe_lock);
+                if(val->intval < 1000){
+                      mutex_lock(&ddata->pe_lock);
+                      ret = mt6375_chg_field_set(ddata, F_IAICR, 1000);
+                      mutex_unlock(&ddata->pe_lock);
+                }else {
+                      mutex_lock(&ddata->pe_lock);
+                      ret = mt6375_chg_field_set(ddata, F_IAICR, val->intval);
+                      mutex_unlock(&ddata->pe_lock);
+                }
 		break;
 	case POWER_SUPPLY_PROP_INPUT_VOLTAGE_LIMIT:
 		if (ddata->chgdev != NULL)
@@ -1483,7 +1508,6 @@ static const struct power_supply_desc mt6375_psy_desc = {
 static int mt6375_enable_charging(struct charger_device *chgdev, bool en)
 {
 	struct mt6375_chg_data *ddata = charger_get_data(chgdev);
-
 	return mt6375_chg_enable_charging(ddata, en);
 }
 
@@ -1871,6 +1895,7 @@ static int mt6375_run_aicc(struct charger_device *chgdev, u32 *uA)
 	ret = mt6375_chg_field_set(ddata, F_AICC_EN, 1);
 	if (ret < 0)
 		goto out;
+	mutex_unlock(&ddata->pe_lock);
 	reinit_completion(&ddata->aicc_done);
 	/* worst case = 128steps * 52msec = 6656ms */
 	ret_comp = wait_for_completion_interruptible_timeout(&ddata->aicc_done,
@@ -1885,13 +1910,16 @@ static int mt6375_run_aicc(struct charger_device *chgdev, u32 *uA)
 		dev_err(ddata->dev, "failed to wait aicc (%d)\n", ret);
 		goto out;
 	}
+	mutex_lock(&ddata->pe_lock);
 	ret = mt6375_chg_field_get(ddata, F_AICC_RPT, uA);
 	if (ret < 0) {
 		dev_err(ddata->dev, "failed to get aicc report\n");
 		goto out;
 	}
+	mutex_unlock(&ddata->pe_lock);
 	*uA = M_TO_U(*uA);
 out:
+	mutex_lock(&ddata->pe_lock);
 	mt6375_chg_field_set(ddata, F_AICC_EN, 0);
 	mutex_unlock(&ddata->pe_lock);
 	return ret;
@@ -2392,6 +2420,7 @@ static const struct charger_ops mt6375_chg_ops = {
 	.reset_eoc_state = mt6375_reset_eoc_state,
 	.safety_check = mt6375_sw_check_eoc,
 	.is_charging_done = mt6375_is_charge_done,
+	.get_charge_ic_stat = mt6375_get_charge_ic_stat,
 	/* power path */
 	.enable_powerpath = mt6375_enable_buck,
 	.is_powerpath_enabled = mt6375_is_buck_enabled,
@@ -2866,7 +2895,7 @@ static int mt6375_set_shipping_mode(struct mt6375_chg_data *ddata)
 		return ret;
 	}
 
-	ret = mt6375_chg_field_set(ddata, F_BATFET_DISDLY, 0);
+	ret = mt6375_chg_field_set(ddata, F_BATFET_DISDLY, 1);
 	if (ret < 0) {
 		dev_err(ddata->dev, "failed to disable ship mode delay\n");
 		return ret;
@@ -2881,6 +2910,33 @@ static int mt6375_set_shipping_mode(struct mt6375_chg_data *ddata)
 	return regmap_update_bits(ddata->rmap, MT6375_REG_CHG_TOP1,
 				  MT6375_MSK_BATFET_DIS, 0xFF);
 }
+
+static int mt6375_set_shipmode(struct notifier_block *reboot_notifier, unsigned long mode, void *nouse)
+{
+	int ret=0;
+        struct mt6375_chg_data * ddata = container_of(reboot_notifier, struct mt6375_chg_data,
+		 reboot_notifier);
+        struct mtk_battery *gm;
+	struct power_supply *psy;
+
+	if (mode == SYS_POWER_OFF) {
+		psy = power_supply_get_by_name("battery");
+		if (psy == NULL)
+			return -ENODEV;
+
+		gm = (struct mtk_battery *)power_supply_get_drvdata(psy);
+	        if(gm->shipmode_flag) {
+	                dev_notice(ddata->dev, "successfully set shipmode\n");
+	                ret = mt6375_set_shipping_mode(ddata);
+	        }
+	        if(ret < 0){
+	                dev_warn(ddata->dev, "failed to set shipmode\n");
+		        return ret;
+	        }
+	}
+	return 0;	
+}
+
 
 static ssize_t shipping_mode_store(struct device *dev,
 				   struct device_attribute *attr,
@@ -2956,6 +3012,10 @@ static int mt6375_chg_probe(struct platform_device *pdev)
 	INIT_DELAYED_WORK(&ddata->rerun_bc12_work, mt6375_rerun_bc12_work);
 	platform_set_drvdata(pdev, ddata);
 
+        ddata->reboot_notifier.notifier_call  =  mt6375_set_shipmode;
+        ddata->reboot_notifier.priority = 255;
+        register_reboot_notifier(&ddata->reboot_notifier);
+        
 	ret = device_create_file(dev, &dev_attr_shipping_mode);
 	if (ret < 0) {
 		dev_err(dev, "failed to create shipping mode attribute\n");
@@ -3021,7 +3081,8 @@ static int mt6375_chg_remove(struct platform_device *pdev)
 
 	mt_dbg(&pdev->dev, "%s\n", __func__);
 	if (ddata) {
-		charger_device_unregister(ddata->chgdev);
+		charger_device_unregister(ddata->chgdev);               
+                unregister_reboot_notifier(&ddata->reboot_notifier);
 		device_remove_file(ddata->dev, &dev_attr_shipping_mode);
 		destroy_workqueue(ddata->wq);
 		mutex_destroy(&ddata->hm_lock);

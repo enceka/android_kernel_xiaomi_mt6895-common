@@ -15,6 +15,10 @@ ccflags-y += -I$(srctree)/drivers/misc/mediatek/audio_ipi/include
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/sensor/2.0/core
 endif
 
+ifeq ($(CONFIG_MIUS_IIO), m)
+ccflags-y += -DCFG_MTK_MIUS
+endif
+
 #KBUILD_EXTRA_SYMBOLS += $(srctree)/drivers/misc/mediatek/sensor/Module.symvers
 
 obj-$(CONFIG_MTK_ULTRASND_PROXIMITY) += elliptic.o

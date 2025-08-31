@@ -31,7 +31,13 @@ static const char *const mt6895_spk_type_str[] = {MTK_SPK_NOT_SMARTPA_STR,
 						  MTK_SPK_RICHTEK_RT5509_STR,
 						  MTK_SPK_MEDIATEK_MT6660_STR,
 						  MTK_SPK_RICHTEK_RT5512_STR,
+#if IS_ENABLED(CONFIG_SND_SMARTPA_AW882XX) || IS_ENABLED(CONFIG_SND_SMARTPA_AW882XX_V11)
+						  MTK_SPK_GOODIX_TFA98XX_STR,
+						  MTK_SPK_AW_AW882XX_STR};
+#else
 						  MTK_SPK_GOODIX_TFA98XX_STR};
+#endif
+
 static const char *const
 	mt6895_spk_i2s_type_str[] = {MTK_SPK_I2S_0_STR,
 				     MTK_SPK_I2S_1_STR,
@@ -1390,7 +1396,10 @@ static int mt6895_mt6368_dev_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev,
 			"spk_node of_get_child_by_name fail\n");
 		//return -EINVAL;
-	}
+	} else {
+            dev_err(&pdev->dev,
+                "FEYNMAN spk_node of_get_child_by_name OK\n");
+    }
 
 	for_each_card_prelinks(card, i, dai_link) {
 		if (!dai_link->platforms->name)

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2015-2016 MediaTek Inc.
- * Copyright (C) 2022 XiaoMi, Inc.
  * Author: Yong Wu <yong.wu@mediatek.com>
  */
 #define pr_fmt(fmt)    "mtk_iommu: " fmt
@@ -1665,7 +1664,6 @@ static int mtk_iommu_map(struct iommu_domain *domain, unsigned long iova,
 
 	/* Synchronize with the tlb_lock */
 	ret = dom->iop->map(dom->iop, iova, paddr, size, prot, gfp);
-
 	//retry if atomic alloc memory fail, most wait 4ms at atomic or 64ms at normal.
 	while (ret == -ENOMEM && (gfp & GFP_ATOMIC) != 0 && retry_count < 8) {
 		pr_info("%s, retry #3 map alloc memory %d\n", __func__, retry_count + 1);
@@ -1677,7 +1675,7 @@ static int mtk_iommu_map(struct iommu_domain *domain, unsigned long iova,
 			ret = dom->iop->map(dom->iop, iova, paddr, size, prot, ignore_atomic);
 		}
 		if (ret == -ENOMEM) {
-			retry_count++;
+			retry_count ++;
 			if (in_atomic() || irqs_disabled() || in_interrupt()) {
 				udelay(500);
 			} else {
@@ -2816,8 +2814,7 @@ static int mtk_iommu_remove(struct platform_device *pdev)
 	iommu_device_sysfs_remove(&data->iommu);
 	iommu_device_unregister(&data->iommu);
 
-	if (iommu_present(&platform_bus_type))
-		bus_set_iommu(&platform_bus_type, NULL);
+	list_del(&data->list);
 
 	clk_disable_unprepare(data->bclk);
 	device_link_remove(data->smicomm_dev, &pdev->dev);
@@ -3416,10 +3413,10 @@ static const struct mtk_iommu_plat_data mt6983_data_disp = {
 	.mau_count	= 4,
 	/* not use larbid_remap */
 	.larbid_remap	= {{0}, {0}, {21}, {0},         /*0 ~ 3*/
-			{2}, {0}, {5}, {0},           /*4 ~ 7*/
-			{7}, {0}, {9, 10, 11, 23},    /*8 ~ 10*/
-			{0}, {13, 25, 27, 29}, {30},  /*11 ~ 13*/
-			{6}, {0}},                    /*14 ~ 15*/
+	                  {2}, {0}, {5}, {0},           /*4 ~ 7*/
+	                  {7}, {0}, {9, 10, 11, 23},    /*8 ~ 10*/
+	                  {0}, {13, 25, 27, 29}, {30},  /*11 ~ 13*/
+	                  {6}, {0}},                    /*14 ~ 15*/
 };
 
 static const struct mtk_iommu_plat_data mt6983_data_mdp = {
@@ -3439,10 +3436,10 @@ static const struct mtk_iommu_plat_data mt6983_data_mdp = {
 	.mau_count	= 4,
 	/* not use larbid_remap */
 	.larbid_remap	= {{1}, {0}, {20}, {0},         /*0 ~ 3*/
-			{3}, {0}, {4}, {0},           /*4 ~ 7*/
-			{8}, {0}, {22, 12, 15, 18},   /*8 ~ 10*/
-			{0}, {14, 26, 16, 17}, {28, 19, 0, 0}, /*11 ~ 13*/
-			{0}, {0}},                    /*14 ~ 15*/
+	                  {3}, {0}, {4}, {0},           /*4 ~ 7*/
+	                  {8}, {0}, {22, 12, 15, 18},   /*8 ~ 10*/
+	                  {0}, {14, 26, 16, 17}, {28, 19, 0, 0}, /*11 ~ 13*/
+	                  {0}, {0}},                    /*14 ~ 15*/
 };
 
 static const struct mtk_iommu_plat_data mt6983_data_apu0 = {

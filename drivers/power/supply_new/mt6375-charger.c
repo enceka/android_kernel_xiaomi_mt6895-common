@@ -27,7 +27,7 @@
 #include "charger_class.h"
 #include "mtk_charger.h"
 
-#define MT6375_MAX_FCC	2500
+#define MT6375_MAX_FCC	3000
 #define MT6375_MAX_ICL	2500
 
 static bool dbg_log_en;
@@ -237,6 +237,7 @@ struct mt6375_chg_data {
 	struct workqueue_struct *wq;
 	struct work_struct bc12_work;
 	struct delayed_work detect_hvchg_work;
+	struct delayed_work rerun_bc12_work;
 	struct completion pe_done;
 	struct completion aicc_done;
 	struct charger_device *chgdev;
@@ -262,6 +263,7 @@ struct mt6375_chg_data {
 	atomic_t eoc_cnt;
 	atomic_t tchg;
 	int vbat0_flag;
+	int recheck_count;
 };
 
 struct mt6375_chg_platform_data {
@@ -873,8 +875,11 @@ static void mt6375_chg_pwr_rdy_process(struct mt6375_chg_data *ddata)
 	if (ret < 0)
 		dev_err(ddata->dev, "failed to set bleed discharge = %d\n",
 			!ddata->pwr_rdy);
-	mt6375_chg_attach_pre_process(ddata, ATTACH_TRIG_PWR_RDY,
-				      ddata->pwr_rdy);
+
+	if (ddata->pwr_rdy)
+		mt6375_chg_attach_pre_process(ddata, ATTACH_TRIG_PWR_RDY, ddata->pwr_rdy);
+	else
+		mt6375_chg_attach_pre_process(ddata, ATTACH_TRIG_TYPEC, ddata->pwr_rdy);
 }
 
 static int mt6375_chg_set_usbsw(struct mt6375_chg_data *ddata,
@@ -997,19 +1002,41 @@ static void mt6375_get_dpdm_voltage(struct mt6375_chg_data *ddata)
 	dev_info(ddata->dev, "[XMCHG][BBC_MT6375] dp_voltage = %d, dm_voltage = %d\n", dp_voltage / 1000, dm_voltage / 1000);
 }
 
+static bool otg_enable = false;
+void mt6375_enable_otg_boost(bool enable)
+{
+	otg_enable = enable;
+}
+EXPORT_SYMBOL(mt6375_enable_otg_boost);
+
+static void mt6375_rerun_bc12_work(struct work_struct *work)
+{
+	struct mt6375_chg_data *ddata = container_of(work,struct mt6375_chg_data, rerun_bc12_work.work);
+
+	if (get_pd_usb_connected() || otg_enable)
+		return;
+
+	if (ddata->psy_usb_type == POWER_SUPPLY_USB_TYPE_FLOAT)
+		mt6375_chg_enable_bc12(ddata, true);
+}
+
 static void mt6375_detect_hvchg_work(struct work_struct *work)
 {
 	int ret = 0, vbus = 0;
 	struct timespec64 time;
 	ktime_t tmp_time = 0;
+	bool retry_done = false;
 	struct mt6375_chg_data *ddata = container_of(work, struct mt6375_chg_data, detect_hvchg_work.work);
 
 	tmp_time = ktime_get_boottime();
 	time = ktime_to_timespec64(tmp_time);
-	if(time.tv_sec < 5)
+	if(time.tv_sec < 25) {
+		schedule_delayed_work(&ddata->detect_hvchg_work, msecs_to_jiffies(3000));
 		return;
+	}
 
-	if (get_pd_usb_connected())
+retry:
+	if (get_pd_usb_connected() || ddata->psy_usb_type == POWER_SUPPLY_USB_TYPE_UNKNOWN)
 		return;
 
 	mt6375_chg_set_usbsw(ddata, USBSW_CHG);
@@ -1028,11 +1055,16 @@ static void mt6375_detect_hvchg_work(struct work_struct *work)
 	if (vbus < 7200) {
 		dev_info(ddata->dev, "[XMCHG][BBC_MT6375] detect HVCHG fail\n");
 		mt6375_set_dpdm_voltage(ddata, 0, 0);
-		msleep(200);
+		if (!retry_done) {
+			retry_done = true;
+			msleep(100);
+			goto retry;
+		}
+		msleep(100);
 		mt6375_get_dpdm_voltage(ddata);
 	} else {
 		dev_info(ddata->dev, "[XMCHG][BBC_MT6375] detect HVCHG success\n");
-		ddata->psy_usb_type = POWER_SUPPLY_USB_TYPE_ACA;
+		ddata->psy_usb_type = POWER_SUPPLY_USB_TYPE_HVCHG;
 		power_supply_changed(ddata->psy);
 	}
 }
@@ -1087,7 +1119,7 @@ static void mt6375_chg_bc12_work_func(struct work_struct *work)
 			ddata->psy_usb_type = POWER_SUPPLY_USB_TYPE_DCP;
 			bc12_en = true;
 			dev_err(ddata->dev, "[XMCHG][BBC_MT6375] start HVCHG detect.\n");
-			schedule_delayed_work(&ddata->detect_hvchg_work, msecs_to_jiffies(1500));
+			schedule_delayed_work(&ddata->detect_hvchg_work, msecs_to_jiffies(3000));
 			break;
 		case PORT_STAT_SDP:
 			ddata->psy_desc.type = POWER_SUPPLY_TYPE_USB;
@@ -1103,7 +1135,13 @@ static void mt6375_chg_bc12_work_func(struct work_struct *work)
 #else
 			ddata->psy_desc.type = POWER_SUPPLY_TYPE_USB;
 #endif
-			ddata->psy_usb_type = POWER_SUPPLY_USB_TYPE_DCP;
+			ddata->psy_usb_type = POWER_SUPPLY_USB_TYPE_FLOAT;
+
+			if (ddata->recheck_count <= 6) {
+				ddata->recheck_count++;
+				dev_err(ddata->dev, "[XMCHG][BBC_MT6375] rerun BC1.2\n");
+				schedule_delayed_work(&ddata->rerun_bc12_work, msecs_to_jiffies(5000));
+			}
 			break;
 		default:
 			bc12_ctrl = false;
@@ -1111,7 +1149,7 @@ static void mt6375_chg_bc12_work_func(struct work_struct *work)
 			dev_err(ddata->dev, "Unknown port stat %d\n", val);
 			goto out;
 		}
-		mt_dbg(ddata->dev, "port stat = %s\n",
+		dev_err(ddata->dev, "port stat = %s\n",
 		       mt6375_port_stat_names[val]);
 	} else {
 		ddata->bc12_dn = false;
@@ -2242,6 +2280,9 @@ static irqreturn_t mt6375_fl_detach_handler(int irq, void *data)
 
 	mt_dbg(ddata->dev, "++\n");
 	mt6375_chg_pwr_rdy_process(ddata);
+	ddata->recheck_count = 0;
+	cancel_delayed_work(&ddata->rerun_bc12_work);
+	cancel_delayed_work(&ddata->detect_hvchg_work);
 	return IRQ_HANDLED;
 }
 
@@ -2899,6 +2940,66 @@ static int mt6375_ops_get_powerpath_enable(struct xmc_device *dev, bool *enable)
 	return ret;
 }
 
+static int mt6375_ops_bc12_enable(struct xmc_device *dev, bool enable)
+{
+	struct mt6375_chg_data *ddata = (struct mt6375_chg_data *)xmc_ops_get_data(dev);
+	int ret = 0;
+
+	mt6375_chg_attach_pre_process(ddata, ATTACH_TRIG_TYPEC, enable);
+
+	return ret;
+}
+
+static int mt6375_ops_charge_timer_enable(struct xmc_device *dev, bool enable)
+{
+	struct mt6375_chg_data *ddata = (struct mt6375_chg_data *)xmc_ops_get_data(dev);
+
+	return mt6375_chg_field_set(ddata, F_CHG_TMR_EN, enable);
+}
+
+static int mt6375_ops_terminate_enable(struct xmc_device *dev, bool enable)
+{
+	struct mt6375_chg_data *ddata = (struct mt6375_chg_data *)xmc_ops_get_data(dev);
+
+	return mt6375_chg_field_set(ddata, F_TE, enable);
+}
+
+static int mt6375_ops_get_charge_state(struct xmc_device *dev, int *value)
+{
+	struct mt6375_chg_data *ddata = (struct mt6375_chg_data *)xmc_ops_get_data(dev);
+	u32 state = 0;
+	int ret = 0;
+
+	ret = mt6375_chg_field_get(ddata, F_IC_STAT, &state);
+	*value = (int)state;
+
+	return ret;
+}
+
+static int mt6375_ops_get_mivr_state(struct xmc_device *dev, bool *enable)
+{
+	struct mt6375_chg_data *ddata = (struct mt6375_chg_data *)xmc_ops_get_data(dev);
+	int ret = 0;
+	u32 val = 0;
+
+	ret = mt6375_chg_field_get(ddata, F_ST_MIVR, &val);
+	if (ret < 0)
+		return ret;
+	*enable = val;
+
+	return ret;
+}
+
+static int mt6375_ops_otg_vbus_enable(struct xmc_device *dev, bool enable)
+{
+	struct mt6375_chg_data *ddata = (struct mt6375_chg_data *)xmc_ops_get_data(dev);
+
+	if (enable)
+		return mt6375_chg_regulator_enable(ddata->rdev);
+	else
+		return mt6375_chg_regulator_disable(ddata->rdev);
+}
+
 static int mt6375_ops_get_vbus(struct xmc_device *dev, int *value)
 {
 	struct mt6375_chg_data *ddata = (struct mt6375_chg_data *)xmc_ops_get_data(dev);
@@ -2929,6 +3030,21 @@ static int mt6375_ops_get_ibus(struct xmc_device *dev, int *value)
 	return ret;
 }
 
+static int mt6375_ops_get_vbat(struct xmc_device *dev, int *value)
+{
+	struct mt6375_chg_data *ddata = (struct mt6375_chg_data *)xmc_ops_get_data(dev);
+	int vbat = 0, ret = 0;
+
+	ret = mt6375_get_adc(ddata->chgdev, ADC_CHANNEL_VBAT, &vbat, &vbat);
+	if (ret < 0) {
+		dev_err(ddata->dev, "[XMCHG][BBC_MT6375] ops failed to get VBAT\n");
+		return ret;
+	}
+
+	*value = vbat / 1000;
+	return ret;
+}
+
 static int mt6375_ops_get_ts(struct xmc_device *dev, int *value)
 {
 	struct mt6375_chg_data *ddata = (struct mt6375_chg_data *)xmc_ops_get_data(dev);
@@ -2944,13 +3060,30 @@ static int mt6375_ops_get_ts(struct xmc_device *dev, int *value)
 	return ret;
 }
 
+static int mt6375_ops_set_dpdm_voltage(struct xmc_device *dev, int dp_voltage, int dm_voltage)
+{
+	struct mt6375_chg_data *ddata = (struct mt6375_chg_data *)xmc_ops_get_data(dev);
+
+	mt6375_set_dpdm_voltage(ddata, 0, 0);
+
+	return 0;
+}
+
 static const struct xmc_ops mt6375_ops = {
 	.charge_enable = mt6375_ops_charge_enable,
 	.get_charge_enable = mt6375_ops_get_charge_enable,
 	.powerpath_enable = mt6375_ops_powerpath_enable,
 	.get_powerpath_enable = mt6375_ops_get_powerpath_enable,
+	.bc12_enable = mt6375_ops_bc12_enable,
+	.charge_timer_enable = mt6375_ops_charge_timer_enable,
+	.terminate_enable = mt6375_ops_terminate_enable,
+	.get_charge_state = mt6375_ops_get_charge_state,
+	.get_mivr_state = mt6375_ops_get_mivr_state,
+	.set_dpdm_voltage = mt6375_ops_set_dpdm_voltage,
+	.otg_vbus_enable = mt6375_ops_otg_vbus_enable,
 	.get_vbus = mt6375_ops_get_vbus,
 	.get_ibus = mt6375_ops_get_ibus,
+	.get_vbat = mt6375_ops_get_vbat,
 	.get_ts = mt6375_ops_get_ts,
 };
 
@@ -3006,6 +3139,7 @@ static int mt6375_chg_probe(struct platform_device *pdev)
 	}
 	INIT_WORK(&ddata->bc12_work, mt6375_chg_bc12_work_func);
 	INIT_DELAYED_WORK(&ddata->detect_hvchg_work, mt6375_detect_hvchg_work);
+	INIT_DELAYED_WORK(&ddata->rerun_bc12_work, mt6375_rerun_bc12_work);
 	platform_set_drvdata(pdev, ddata);
 
 	ret = device_create_file(dev, &dev_attr_shipping_mode);

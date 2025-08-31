@@ -28,7 +28,7 @@
 #include "ln8410_reg.h"
 #include "../../misc/hwid/hwid.h"
 
-static int log_level = 1;
+static int log_level = 2;
 
 #define bq_err(fmt, ...)					\
 do {								\
@@ -935,7 +935,7 @@ static int sc8561_init_protection(struct sc8561_device *cp, int forward_work_mod
 	ret = sc8561_enable_batovp_alarm(cp, true);
 	ret = sc8561_enable_busocp_alarm(cp, true);
 	ret = sc8561_set_batovp_th(cp, 4650);
-	ret = sc8561_set_batocp_th(cp, 8000);
+	ret = sc8561_set_batocp_th(cp, 12400);
 	ret = sc8561_set_batovp_alarm_th(cp, 4600);
 	if (forward_work_mode == CP_FORWARD_4_TO_1) {
 		ret = sc8561_set_busovp_th(cp, 22000);
@@ -943,11 +943,16 @@ static int sc8561_init_protection(struct sc8561_device *cp, int forward_work_mod
 		ret = sc8561_set_usbovp_th(cp, 22000);
 	} else if (forward_work_mode == CP_FORWARD_2_TO_1) {
 		ret = sc8561_set_busovp_th(cp, 11000);
-		ret = sc8561_set_busocp_th(cp, 3750);
+		ret = sc8561_set_busocp_th(cp, 6100);
 		ret = sc8561_set_usbovp_th(cp, 14000);
 	} else {
 		//To do later for forward 1:1 mode
-		;
+		ret = sc8561_get_operation_mode(cp, &cp->work_mode);
+		if(cp->work_mode != SC8561_FORWARD_1_1_CHARGER_MODE)
+			cp->work_mode = SC8561_FORWARD_1_1_CHARGER_MODE;
+		ret = sc8561_set_busovp_th(cp, 6500);
+		ret = sc8561_set_busocp_th(cp, 6100);
+		ret = sc8561_set_usbovp_th(cp, 14000);
 	}
 	//ret = sc8561_set_busovp_th(cp, cp->bus_ovp_threshold);
 	//ret = sc8561_set_busocp_th(cp, cp->bus_ocp_threshold);
@@ -1812,7 +1817,7 @@ static int ln8410_init_device(struct sc8561_device *cp)
 
 	ln8410_soft_reset(cp);
 	regmap_write(cp->regmap, LN8410_REG_RECOVERY_CTRL, 0x00); // turn off all auto recovery
-	ln8410_set_REGN_pull_down(cp, true);
+	ln8410_set_REGN_pull_down(cp, false);
 	protected_reg_init(cp);
 	ln8410_fsw_set(cp, LN8410_FSW_SET_580K);
 	ln8410_init_protection(cp, CP_FORWARD_4_TO_1);
@@ -1996,16 +2001,39 @@ static int ops_cp_enable_adc(struct charger_device *chg_dev, bool enable)
 	return ret;
 }
 
+static int sc8561_get_bypass_enable(struct sc8561_device  *bq, bool *enable)
+{
+	int ret = 0;
+	unsigned int data = 0;
+
+	ret = regmap_read(bq->regmap, SC8561_REG_0E, &data);
+	if (ret < 0) {
+		bq_err("%s failed to read device id\n", bq->log_tag);
+		return ret;
+	}
+	*enable = !!(data & SC8561_ENABLE_BYPASS_BIT);
+	bq_err("success get bypass_mode %d", *enable);
+	return ret;
+}
+
 static int ops_cp_is_bypass_enabled(struct charger_device *chg_dev, bool *enabled)
 {
-	*enabled = false;
-	return 0;
+	struct sc8561_device *chip = charger_get_data(chg_dev);
+	int ret = 0;
+
+	ret = sc8561_get_bypass_enable(chip, enabled);
+
+	return ret;
 }
 
 
 static int ops_cp_get_bypass_support(struct charger_device *chg_dev, bool *enabled)
 {
+#if defined(CONFIG_TARGET_PRODUCT_DAUMIER)
 		*enabled = 0;
+#else
+		*enabled = 0;
+#endif
 		chr_err("%s %d\n", __func__, *enabled);
 		return 0;
 }
@@ -2377,11 +2405,14 @@ static int sc8561_probe(struct i2c_client *client,
 	char *xagapro = strnstr(buf, "xagapro", strlen(buf));
 	if(!xagapro)
 		xaga = strnstr(buf, "xaga", strlen(buf));
+	bq_err("%s buf: %s, xaga = %d, xagapro = %d\n", __func__, buf, xaga ? 1 : 0, xagapro ? 1 : 0);
 	if(xagapro)
 		bq_err("%s ++\n", __func__);
 	else if(xaga) {
+		bq_err("%s exit\n", __func__);
 		return -ENODEV;
 	} else {
+		bq_err("%s project_name error exit\n", __func__);
 		return -ENODEV;
 	}
 #endif

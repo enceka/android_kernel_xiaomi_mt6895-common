@@ -3,12 +3,12 @@
  * HwId Module driver for mi dirver acquire some hwid build info,
  * which is only used for xiaomi corporation internally.
  *
- * Copyright (C) 2021-2022 XiaoMi, Inc.
+ * Copyright (c) 2020 xiaomi inc.
  */
 
 /*****************************************************************************
- * Included header files
- *****************************************************************************/
+* Included header files
+*****************************************************************************/
 #include <linux/export.h>
 #include <linux/sysfs.h>
 #include <linux/fs.h>
@@ -22,12 +22,12 @@
 #include "hwid.h"
 
 /*****************************************************************************
- * Global variable or extern global variabls
- *****************************************************************************/
-static char *sku;
-static char *country;
-static char *level;
-static char *version;
+* Global variable or extern global variabls
+*****************************************************************************/
+static char *sku = NULL;
+static char *country = NULL;
+static char *level = NULL;
+static char *version = NULL;
 
 module_param(sku, charp, 0444);
 MODULE_PARM_DESC(sku, "xiaomi sku value support");
@@ -41,6 +41,14 @@ MODULE_PARM_DESC(level, "xiaomi level value support");
 module_param(version, charp, 0444);
 MODULE_PARM_DESC(version, "xiaomi version value support");
 
+static uint build_adc;
+module_param(build_adc, uint, 0444);
+MODULE_PARM_DESC(build_adc, "xiaomi adc value of build resistance");
+
+static uint project_adc;
+module_param(project_adc, uint, 0444);
+MODULE_PARM_DESC(project_adc, "xiaomi adc value of project resistance");
+
 static struct kobject *hwid_kobj;
 #define hwid_attr(_name) \
 static struct kobj_attribute _name##_attr = {	\
@@ -53,8 +61,8 @@ static struct kobj_attribute _name##_attr = {	\
 }
 
 /*****************************************************************************
- * Global variable or extern global functions
- *****************************************************************************/
+* Global variable or extern global functions
+*****************************************************************************/
 static ssize_t hwid_sku_show(struct kobject *kobj,
 		struct kobj_attribute *attr, char *buf)
 {
@@ -77,6 +85,18 @@ static ssize_t hwid_version_show(struct kobject *kobj,
 		struct kobj_attribute *attr, char *buf)
 {
 	return snprintf(buf, PAGE_SIZE, "%s\n", version);
+}
+
+static ssize_t hwid_project_adc_show(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%d\n", project_adc);
+}
+
+static ssize_t hwid_build_adc_show(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%d\n", build_adc);
 }
 
 const char *get_hw_sku(void)
@@ -107,12 +127,16 @@ hwid_attr(hwid_sku);
 hwid_attr(hwid_country);
 hwid_attr(hwid_level);
 hwid_attr(hwid_version);
+hwid_attr(hwid_project_adc);
+hwid_attr(hwid_build_adc);
 
 static struct attribute *hwid_attrs[] = {
 	&hwid_sku_attr.attr,
 	&hwid_country_attr.attr,
 	&hwid_level_attr.attr,
 	&hwid_version_attr.attr,
+	&hwid_project_adc_attr.attr,
+	&hwid_build_adc_attr.attr,
 	NULL,
 };
 
@@ -121,8 +145,8 @@ static struct attribute_group attr_group = {
 };
 
 /*****************************************************************************
- *  Name: hwid_module_init
- *****************************************************************************/
+*  Name: hwid_module_init
+*****************************************************************************/
 static int __init hwid_module_init(void)
 {
 	int ret = -ENOMEM;
@@ -146,8 +170,8 @@ fail:
 }
 
 /*****************************************************************************
- *  Name: hwid_module_exit
- *****************************************************************************/
+*  Name: hwid_module_exit
+*****************************************************************************/
 static void __exit hwid_module_exit(void)
 {
 	if (hwid_kobj) {

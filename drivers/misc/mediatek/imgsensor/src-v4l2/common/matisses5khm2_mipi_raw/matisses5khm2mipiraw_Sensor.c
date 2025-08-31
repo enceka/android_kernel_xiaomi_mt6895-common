@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (c) 2019 MediaTek Inc.
-// Copyright (C) 2022 XiaoMi, Inc.
 
 /*****************************************************************************
  *
@@ -79,8 +78,8 @@
 
 
 //static kal_uint8 pre_is_fullsize = 0;
-static kal_uint8 enable_seamless;
-static kal_uint8 seamless_state;
+static kal_uint8 enable_seamless = 0;
+static kal_uint8 seamless_state = 0;
 static struct SET_SENSOR_AWB_GAIN last_sensor_awb;
 
 
@@ -351,8 +350,8 @@ static struct SET_PD_BLOCK_INFO_T imgsensor_pd_info[3] = {
 			{18, 19}, {22, 20}, {16, 24}, {20, 23},
 		},
 		.i4Crop = {
-			{0, 0}, {0, 0}, {0, 374}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 374}, {0, 0},
-			{0, 0}, {0, 0}, {0, 374},
+			{0,0}, {0,0},{0,374},{0,0},{0,0},{0,0},{0,0},{0,374},{0,0},
+			{0,0},{0,0},{0,374},
 		}
 	},
 	{
@@ -375,8 +374,8 @@ static struct SET_PD_BLOCK_INFO_T imgsensor_pd_info[3] = {
 			{22, 16}, /*{23, 17},*/ {10, 18}, /*{11, 19},*/
 		},
 		.i4Crop = {
-			{0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0},
-			{4000, 3000},
+			{0,0}, {0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},
+			{4000,3000},
 		}
 	},
 };
@@ -598,7 +597,8 @@ static void set_shutter_frame_length(struct subdrv_ctx *ctx, kal_uint16 shutter,
 
 	if (shutter & 0xFFFF0000) {
 		Rshift = 6;
-	} else {
+	}
+	else {
 		Rshift = 0;
 	}
 
@@ -722,6 +722,23 @@ static void matisses5khm2_set_lsc_reg_setting(struct subdrv_ctx *ctx,
 {
 
 }
+
+static void check_streamon(struct subdrv_ctx *ctx)
+{
+	int stream_status;
+	int cnt = 100;
+	int i   = 0;
+	while (ctx->is_streaming && (i < cnt)) {
+		stream_status = read_cmos_sensor_8(ctx, 0x0005);
+		S5KHM2_LOG_INF("stream_status : %d\n", stream_status);
+		if (stream_status != 0xFF) {
+			break;
+		}
+		i++;
+		mdelay(3);
+	}
+}
+
 /*************************************************************************
  * FUNCTION
  *	night_mode
@@ -745,15 +762,18 @@ static kal_uint32 streaming_control(struct subdrv_ctx *ctx, kal_bool enable)
 	if (enable) {
 		mdelay(5);
 		write_cmos_sensor(ctx, 0x0100, 0x0103);
+		ctx->is_streaming = true;
 		mdelay(5);
 	} else {
+		check_streamon(ctx);
 		write_cmos_sensor(ctx, 0x0100, 0x0000);
+		ctx->is_streaming = false;
 	}
 	return ERROR_NONE;
 }
 
 static kal_uint16 matisses5khm2_fast_write_cmos_sensor(struct subdrv_ctx *ctx,
-				kal_uint16 *para, kal_uint32 len)
+                                 kal_uint16 *para, kal_uint32 len)
 {
 	kal_uint32 burst_thr     = 100;
 	kal_uint32 IDX           = 0;
@@ -1032,7 +1052,7 @@ static void custom6_setting(struct subdrv_ctx *ctx)
 static void custom7_setting(struct subdrv_ctx *ctx)
 {
 	S5KHM2_LOG_INF("+\n");
-	normal_video_setting(ctx, ctx->current_fps);
+	normal_video_setting(ctx,ctx->current_fps);
 	seamless_state = 0;
 	S5KHM2_LOG_INF("-\n");
 }
@@ -2118,7 +2138,7 @@ static int feature_control(
 			SENSOR_OUTPUT_FORMAT_RAW_4CELL_HW_BAYER_Gb;
 			break;
 		}
-		S5KHM2_LOG_INF("SENSOR_FEATURE_GET_OUTPUT_FORMAT_BY_SCENARIO get:%d\n", *(feature_data + 1));
+		S5KHM2_LOG_INF("SENSOR_FEATURE_GET_OUTPUT_FORMAT_BY_SCENARIO get:%d\n",*(feature_data + 1));
 	break;
 	case SENSOR_FEATURE_GET_AWB_REQ_BY_SCENARIO:
 		switch (*feature_data) {

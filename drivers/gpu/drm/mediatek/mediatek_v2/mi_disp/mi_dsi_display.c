@@ -18,10 +18,10 @@
 //#include <drm/drmP.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_connector.h>
+#include <uapi/drm/mi_disp.h>
 
 #include "mi_dsi_panel.h"
 #include "mi_disp_print.h"
-
 //static atomic64_t g_param = ATOMIC64_INIT(0);
 
 int mi_dsi_display_set_disp_param(void *display,
@@ -170,6 +170,17 @@ ssize_t mi_dsi_display_read_wp_info(void *display,
 	return mi_dsi_panel_get_wp_info(dsi_display, buf, size);
 }
 
+ssize_t mi_dsi_display_read_grayscale_info(void *display,
+			char *buf, size_t size)
+{
+	struct mtk_dsi *dsi_display = (struct mtk_dsi *)display;
+	if (!dsi_display) {
+		pr_err("%s: dsi_display is NULL\n", __func__);
+		return -EINVAL;
+	}
+	return mi_dsi_panel_get_grayscale_info(dsi_display, buf, size);
+}
+
 int mi_dsi_display_get_fps(void *display,
 			u32 *fps)
 {
@@ -282,6 +293,20 @@ int mi_dsi_display_get_max_brightness_clone(void *display,
 	}
 
 	*max_brightness_clone = dsi_display->mi_cfg.max_brightness_clone;
+	return 0;
+}
+
+int mi_dsi_display_get_factory_max_brightness(void *display,
+			u32 *max_brightness_clone)
+{
+	struct mtk_dsi *dsi_display = (struct mtk_dsi *)display;
+
+	if (!dsi_display) {
+		DISP_ERROR("Invalid display ptr\n");
+		return -EINVAL;
+	}
+
+	*max_brightness_clone = dsi_display->mi_cfg.factory_max_brightness;
 	return 0;
 }
 

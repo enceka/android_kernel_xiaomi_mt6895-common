@@ -47,7 +47,10 @@
 #define ELLIPTIC_DRAM_PAYLOAD_MAX_OFFSET ((uint16_t) 8)
 #define ELLIPTIC_SCP_IPI_RETRY_TIMES 1000
 
+#ifndef CFG_MTK_MIUS
 static elliptic_ipi_scp_to_host_message_t usnd_ipi_receive;
+#endif
+
 static struct scp_elliptic_reserved_mem_t debug_segment;
 
 int32_t elliptic_debug_io_open(void)
@@ -82,6 +85,8 @@ int elliptic_io_open_port(int portid) {
 int elliptic_io_close_port(int portid) {
 	return 0;
 }
+
+#ifndef CFG_MTK_MIUS
 
 static void copy_to_local_ap_cache(
 	const char *name, uint32_t shared_object_id, size_t shared_object_size,
@@ -217,14 +222,19 @@ static int elliptic_data_io_ipi_handler(
 	}
 	return 0;
 }
+#endif
 
 int elliptic_data_io_initialize(void)
 {
 
+#ifndef CFG_MTK_MIUS
 	enum scp_ipi_status status;
 	status = mtk_ipi_register(&scp_ipidev, IPI_IN_ELLIPTIC_ULTRA_0,
 		(mbox_pin_cb_t)elliptic_data_io_ipi_handler, NULL,
 		&usnd_ipi_receive);
+#else
+	enum scp_ipi_status status = SCP_IPI_DONE;
+#endif
 	/*
 	status = scp_ipi_registration(IPI_ELLIPTIC,
 		(void *)elliptic_data_io_ipi_handler, "elliptic_data_io");

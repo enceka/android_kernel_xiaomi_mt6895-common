@@ -103,6 +103,7 @@ obj-$(CONFIG_MTK_GATE_IC) += gate_ic/
 obj-$(CONFIG_MTK_WIDEVINE_DRM) += widevine_drm/
 obj-$(CONFIG_INTERCONNECT_MTK_MMQOS_COMMON) += mmqos/
 obj-$(CONFIG_MTK_TIMER_ACCURACY_TEST) += timer/
+obj-y += cam_log/
 subdir-ccflags-y += -D__XIAOMI_CAMERA__
 ifeq ($(CONFIG_BUILD_XIAOMI_CAMERA_IMAGE_NAMES),"matisse")
 subdir-ccflags-y += -DMATISSE_CAM
@@ -112,4 +113,22 @@ subdir-ccflags-y += -DRUBENS_CAM
 endif
 ifeq ($(CONFIG_BUILD_XIAOMI_CAMERA_IMAGE_NAMES),"xaga")
 subdir-ccflags-y += -DXAGA_CAM
+endif
+ifeq ($(CONFIG_BUILD_XIAOMI_CAMERA_IMAGE_NAMES),"pearl")
+subdir-ccflags-y += -DPEARL_CAM
+endif
+ifeq ($(CONFIG_BUILD_XIAOMI_CAMERA_IMAGE_NAMES),"plato")
+subdir-ccflags-y += -DPLATO_CAM
+endif
+ifeq ($(CONFIG_BUILD_XIAOMI_CAMERA_IMAGE_NAMES),"daumier")
+subdir-ccflags-y += -DDAUMIER_CAM
+endif
+ifeq ($(CONFIG_BUILD_XIAOMI_CAMERA_IMAGE_NAMES),"yuechu")
+subdir-ccflags-y += -DYUECHU_CAM
+endif
+ifeq ($(CONFIG_BUILD_XIAOMI_CAMERA_IMAGE_NAMES),"rembrandt")
+subdir-ccflags-y += -DREMBRANDT_CAM
+endif
+ifeq ($(CONFIG_BUILD_XIAOMI_CAMERA_IMAGE_NAMES),"aristotle")
+subdir-ccflags-y += -DARISTOTLE_CAM
 endif

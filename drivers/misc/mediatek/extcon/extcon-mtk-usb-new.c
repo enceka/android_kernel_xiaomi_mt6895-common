@@ -27,6 +27,9 @@
 #include "tcpm.h"
 #endif
 
+extern void xmc_enable_otg_boost(bool enable);
+extern void mt6375_enable_otg_boost(bool enable);
+
 static const unsigned int usb_extcon_cable[] = {
 	EXTCON_USB,
 	EXTCON_USB_HOST,
@@ -162,7 +165,7 @@ static int mtk_usb_extcon_psy_init(struct mtk_extcon_info *extcon)
 	int ret = 0;
 	struct device *dev = extcon->dev;
 
-	extcon->usb_psy = devm_power_supply_get_by_phandle(dev, "charger");
+	extcon->usb_psy = power_supply_get_by_name("usb");
 	if (IS_ERR_OR_NULL(extcon->usb_psy)) {
 		dev_err(dev, "fail to get usb_psy\n");
 		return -EINVAL;
@@ -193,6 +196,9 @@ static int mtk_usb_extcon_set_vbus(struct mtk_extcon_info *extcon,
 	/* vbus is optional */
 	if (!vbus || extcon->vbus_on == is_on)
 		return 0;
+
+	xmc_enable_otg_boost(is_on);
+	mt6375_enable_otg_boost(is_on);
 
 	if (is_on) {
 		if (extcon->vbus_vol) {

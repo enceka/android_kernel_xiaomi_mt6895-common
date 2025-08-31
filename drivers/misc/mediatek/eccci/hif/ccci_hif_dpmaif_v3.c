@@ -79,6 +79,7 @@
 
 struct hif_dpmaif_ctrl *dpmaif_ctrl_v3;
 #define dpmaif_ctrl dpmaif_ctrl_v3
+static unsigned int g_backup_dl_isr, g_backup_ul_isr;
 
 
 static struct dpmaif_clk_node g_clk_tbs[] = {
@@ -1418,6 +1419,24 @@ static int dpmaifq_rx_notify_hw(struct dpmaif_rx_queue *rxq,
 	return ret;
 }
 
+static inline int dpmaif_rxq_check_pit_seq(struct dpmaif_rx_queue *rxq, unsigned int pit_seq)
+{
+	if (rxq->pit_seq != pit_seq) {
+		CCCI_ERROR_LOG(0, TAG,
+			"[%s] error: pit_seq is invalid: (%u/%u)\n",
+			__func__, rxq->pit_seq, pit_seq);
+
+		return DATA_CHECK_FAIL;
+	}
+
+	if (rxq->pit_seq == 0xFE)
+		rxq->pit_seq = 0;
+	else
+		rxq->pit_seq++;
+
+	return 0;
+}
+
 /*
  * #define GET_PKT_INFO_PTR(rxq, pit_idx)  \
  * ((struct dpmaifq_normal_pit *)rxq->pit_base + pit_idx)
@@ -1495,6 +1514,15 @@ static int dpmaif_rx_start(struct dpmaif_rx_queue *rxq, unsigned short pit_cnt,
 		pkt_inf_t = (struct dpmaifq_normal_pit *)rxq->pit_base +
 			cur_pit;
 #endif
+
+		ret = dpmaif_rxq_check_pit_seq(rxq,
+					((struct dpmaifq_normal_pit *)pkt_inf_t)->pit_seq);
+		if (ret) {
+			dpmaif_dump_rxq_remain(dpmaif_ctrl,
+				DPMAIF_RXQ_NUM, 1);
+			return ret;
+		}
+
 		if ((dpmaif_ctrl->enable_pit_debug > 0) &&
 			dpmaif_debug_add_data(&rxq->dbg_data, pkt_inf_t,
 				sizeof(struct dpmaifq_normal_pit)) < 0) {
@@ -3111,6 +3139,7 @@ static int dpmaif_start(unsigned char hif_id)
 	for (i = 0; i < DPMAIF_RXQ_NUM; i++) {
 		rxq = &dpmaif_ctrl->rxq[i];
 		rxq->que_started = true;
+		rxq->pit_seq = 0;
 		rxq->index = i;
 		dpmaif_rx_hw_init(rxq);
 
@@ -3629,6 +3658,14 @@ static int dpmaif_resume(unsigned char hif_id)
 	/*IP don't power down before*/
 	if (drv3_dpmaif_check_power_down() == false) {
 		CCCI_DEBUG_LOG(0, TAG, "sys_resume no need restore\n");
+	} else {
+		/* for dpmaif backfill  DL&UL register value */
+		DPMA_WRITE_AO_UL(NRL2_DPMAIF_AO_UL_AP_L2TIMSR0, g_backup_ul_isr);
+		DPMA_WRITE_AO_UL(NRL2_DPMAIF_AO_UL_APDL_L2TIMSR0, g_backup_dl_isr);
+
+		/* use msk to clear dummy interrupt */
+		DPMA_WRITE_PD_MISC(DPMAIF_PD_AP_DL_L2TISAR0, g_backup_dl_isr);
+		DPMA_WRITE_PD_MISC(DPMAIF_PD_AP_UL_L2TISAR0, g_backup_ul_isr);
 	}
 
 	return 0;
@@ -3656,6 +3693,11 @@ static int dpmaif_suspend(unsigned char hif_id __maybe_unused)
 	/* dpmaif clock on: backup int mask. */
 	dpmaif_ctrl->rxq[0].reg_int_mask_bak =
 		drv3_dpmaif_get_dl_interrupt_mask();
+
+	/* for dpmaif backup DL&UL register value */
+	g_backup_dl_isr = drv3_dpmaif_get_dl_interrupt_mask();
+	g_backup_ul_isr = DPMA_READ_AO_UL(NRL2_DPMAIF_AO_UL_AP_L2TIMR0);
+
 	return 0;
 }
 

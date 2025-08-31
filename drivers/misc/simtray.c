@@ -1,10 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
-/*
- * SIM card and SD card tray insertion and extraction monitoring support
- *
- * Copyright (C) 2021-2022 XiaoMi, Inc.
- */
-
 #include <linux/device.h>
 #include <linux/init.h>
 #include <linux/kernel.h>

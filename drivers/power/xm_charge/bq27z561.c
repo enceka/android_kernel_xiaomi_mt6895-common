@@ -30,11 +30,6 @@
 
 #include "xmc_core.h"
 
-enum product_name {
-	PISSARRO,
-	PISSARROPRO,
-};
-
 enum fg_reg_idx {
 	BQ_FG_REG_CTRL = 0,
 	BQ_FG_REG_TEMP,		/* Battery Temperature */
@@ -103,113 +98,63 @@ enum fg_mac_cmd {
 	FG_MAC_CMD_LIFETIME3		= 0x0062,
 	FG_MAC_CMD_DASTATUS1		= 0x0071,
 	FG_MAC_CMD_ITSTATUS1		= 0x0073,
+	FG_MAC_CMD_ITSTATUS2		= 0x0074,
 	FG_MAC_CMD_QMAX			= 0x0075,
 	FG_MAC_CMD_FCC_SOH		= 0x0077,
 	FG_MAC_CMD_RA_TABLE		= 0x40C0,
 };
 
-static int product_name = PISSARRO;
 static struct charge_chip *g_chip = NULL;
 
-static int __fg_write_byte(struct i2c_client *client, u8 reg, u8 val)
-{
-	s32 ret = 0;
-
-	ret = i2c_smbus_write_byte_data(client, reg, val);
-	if (ret < 0) {
-		xmc_info("i2c write byte fail: can't write 0x%02X to reg 0x%02X\n", val, reg);
-		return ret;
-	}
-
-	return 0;
-}
-
-static int __fg_read_word(struct i2c_client *client, u8 reg, u16 *val)
-{
-	s32 ret = 0;
-
-	ret = i2c_smbus_read_word_data(client, reg);
-	if (ret < 0) {
-		xmc_info("i2c read word fail: can't read from reg 0x%02X\n", reg);
-		return ret;
-	}
-
-	*val = (u16)ret;
-
-	return 0;
-}
-
-static int __fg_read_block(struct i2c_client *client, u8 reg, u8 *buf, u8 len)
-{
-	int ret = 0, i = 0;
-
-	for(i = 0; i < len; i++) {
-		ret = i2c_smbus_read_byte_data(client, reg + i);
-		if (ret < 0) {
-			xmc_info("i2c read reg 0x%02X faild\n", reg + i);
-			return ret;
-		}
-		buf[i] = ret;
-	}
-
-	return ret;
-}
-
-static int __fg_write_block(struct i2c_client *client, u8 reg, u8 *buf, u8 len)
-{
-	int ret = 0, i = 0;
-
-	for(i = 0; i < len; i++) {
-		ret = i2c_smbus_write_byte_data(client, reg + i, buf[i]);
-		if (ret < 0) {
-			xmc_info("i2c read reg 0x%02X faild\n", reg + i);
-			return ret;
-		}
-	}
-
-	return ret;
-}
-
-static int fg_write_byte(struct fg_chip *chip, u8 reg, u8 val)
-{
-	int ret;
-
-	mutex_lock(&chip->i2c_rw_lock);
-	ret = __fg_write_byte(chip->client, reg, val);
-	mutex_unlock(&chip->i2c_rw_lock);
-
-	return ret;
-}
+static struct regmap_config fg_regmap_config = {
+	.reg_bits  = 8,
+	.val_bits  = 8,
+	.max_register  = 0xFF,
+};
 
 static int fg_read_word(struct fg_chip *chip, u8 reg, u16 *val)
 {
-	int ret;
+	u8 data[2] = {0, 0};
+	int ret = 0;
 
-	mutex_lock(&chip->i2c_rw_lock);
-	ret = __fg_read_word(chip->client, reg, val);
-	mutex_unlock(&chip->i2c_rw_lock);
+	ret = regmap_raw_read(chip->regmap, reg, data, 2);
+	if (ret) {
+		xmc_err("%s I2C failed to read 0x%02x\n", chip->log_tag, reg);
+		return ret;
+	}
 
+	*val = (data[1] << 8) | data[0];
 	return ret;
 }
 
 static int fg_read_block(struct fg_chip *chip, u8 reg, u8 *buf, u8 len)
 {
-	int ret;
+	int ret = 0, i = 0;
+	unsigned int data = 0;
 
-	mutex_lock(&chip->i2c_rw_lock);
-	ret = __fg_read_block(chip->client, reg, buf, len);
-	mutex_unlock(&chip->i2c_rw_lock);
+	for (i = 0; i < len; i++) {
+		ret = regmap_read(chip->regmap, reg + i, &data);
+		if (ret) {
+			xmc_err("%s I2C failed to read 0x%02x\n", chip->log_tag, reg + i);
+			return ret;
+		}
+		buf[i] = data;
+	}
 
 	return ret;
 }
 
 static int fg_write_block(struct fg_chip *chip, u8 reg, u8 *data, u8 len)
 {
-	int ret;
+	int ret = 0, i = 0;
 
-	mutex_lock(&chip->i2c_rw_lock);
-	ret = __fg_write_block(chip->client, reg, data, len);
-	mutex_unlock(&chip->i2c_rw_lock);
+	for (i = 0; i < len; i++) {
+		ret = regmap_write(chip->regmap, reg + i, (unsigned int)data[i]);
+		if (ret) {
+			xmc_err("%s I2C failed to write 0x%02x\n", chip->log_tag, reg + i);
+			return ret;
+		}
+	}
 
 	return ret;
 }
@@ -263,6 +208,90 @@ static int fg_mac_read_block(struct fg_chip *chip, u16 cmd, u8 *buf, u8 len)
 	return 0;
 }
 
+static int fg_mac_write_block(struct fg_chip *chip, u16 cmd, u8 *data, u8 len)
+{
+	u8 cksum = 0;
+	u8 t_buf[40] = {0};
+	int i = 0, ret = 0;
+
+	if (len > 32)
+		return -1;
+
+	t_buf[0] = (u8)cmd;
+	t_buf[1] = (u8)(cmd >> 8);
+	for (i = 0; i < len; i++)
+		t_buf[i+2] = data[i];
+
+	/*write command/addr, data*/
+	ret = fg_write_block(chip, chip->regs[BQ_FG_REG_ALT_MAC], t_buf, len + 2);
+	if (ret < 0) {
+		xmc_err("%s failed to write block, ret = %d\n", chip->log_tag, ret);
+		return ret;
+	}
+
+	cksum = fg_checksum(data, len + 2);
+	t_buf[0] = cksum;
+	t_buf[1] = len + 4; /*buf length, cmd, CRC and len byte itself*/
+	/*write checksum and length*/
+	ret = fg_write_block(chip, chip->regs[BQ_FG_REG_MAC_CHKSUM], t_buf, 2);
+	if (ret < 0) {
+		xmc_err("%s failed to write block, ret = %d\n", chip->log_tag, ret);
+		return ret;
+	}
+
+	return ret;
+}
+
+static int fg_set_fast_charge(struct fg_chip *chip, bool enable)
+{
+	u8 data[5] = {0};
+	int ret = 0;
+
+	if (chip->fast_charge == enable)
+		return ret;
+
+	data[0] = chip->fast_charge = enable;
+
+	if (chip->device_name == FG_BQ28Z610)
+		return ret;
+
+	if (enable) {
+		ret = fg_mac_write_block(chip, FG_MAC_CMD_FASTCHARGE_EN, data, 2);
+		if (ret) {
+			xmc_err("%s failed to write fastcharge, ret = %d\n", chip->log_tag, ret);
+			return ret;
+		}
+	} else {
+		ret = fg_mac_write_block(chip, FG_MAC_CMD_FASTCHARGE_DIS, data, 2);
+		if (ret) {
+			xmc_err("%s failed to write fastcharge, ret = %d\n", chip->log_tag, ret);
+			return ret;
+		}
+	}
+
+	return ret;
+}
+
+static int fg_set_shutdown_mode(struct fg_chip *chip)
+{
+	int ret = 0;
+	u8 data[5] = {0};
+
+	xmc_info("%s fg_set_shutdown_mode\n", chip->log_tag);
+	chip->shutdown_mode = true;
+	data[0] = 1;
+
+	ret = fg_mac_write_block(chip, FG_MAC_CMD_SHUTDOWN, data, 2);
+	if (ret)
+		xmc_err("%s failed to send shutdown cmd 0\n", chip->log_tag);
+
+	ret = fg_mac_write_block(chip, FG_MAC_CMD_SHUTDOWN, data, 2);
+	if (ret)
+		xmc_err("%s failed to send shutdown cmd 1\n", chip->log_tag);
+
+	return ret;
+}
+
 static int fg_sha256_auth(struct fg_chip *chip, u8 *challenge, int length)
 {
 	int ret = 0;
@@ -281,11 +310,11 @@ static int fg_sha256_auth(struct fg_chip *chip, u8 *challenge, int length)
 		return ret;
 
 	cksum_calc = fg_checksum(challenge, length);
-	ret = fg_write_byte(chip, chip->regs[BQ_FG_REG_MAC_CHKSUM], cksum_calc);
+	ret = regmap_write(chip->regmap, chip->regs[BQ_FG_REG_MAC_CHKSUM], cksum_calc);
 	if (ret < 0)
 		return ret;
 
-	ret = fg_write_byte(chip, chip->regs[BQ_FG_REG_MAC_DATA_LEN], length + 4);
+	ret = regmap_write(chip->regmap, chip->regs[BQ_FG_REG_MAC_DATA_LEN], length + 4);
 	if (ret < 0)
 		return ret;
 
@@ -298,12 +327,126 @@ static int fg_sha256_auth(struct fg_chip *chip, u8 *challenge, int length)
 	return 0;
 }
 
+static int fg_read_temp_max(struct fg_chip *chip)
+{
+	char data_limetime1[32];
+	int ret = 0;
+
+	if (chip->fac_no_bat || chip->rw_lock)
+		return 250;
+
+	memset(data_limetime1, 0, sizeof(data_limetime1));
+
+	ret = fg_mac_read_block(chip, FG_MAC_CMD_LIFETIME1, data_limetime1, sizeof(data_limetime1));
+	if (ret)
+		xmc_err("%s failed to get FG_MAC_CMD_LIFETIME1\n", chip->log_tag);
+
+	return data_limetime1[6];
+}
+
+static int fg_read_time_ot(struct fg_chip *chip)
+{
+	char data_limetime3[32];
+	char data[32];
+	int ret = 0;
+
+	memset(data_limetime3, 0, sizeof(data_limetime3));
+	memset(data, 0, sizeof(data));
+
+	ret = fg_mac_read_block(chip, FG_MAC_CMD_LIFETIME3, data_limetime3, sizeof(data_limetime3));
+	if (ret)
+		xmc_err("failed to get FG_MAC_CMD_LIFETIME3\n", chip->log_tag);
+
+	ret = fg_mac_read_block(chip, FG_MAC_CMD_MANU_NAME, data, sizeof(data));
+	if (ret)
+		xmc_err("failed to get FG_MAC_CMD_MANU_NAME\n", chip->log_tag);
+
+	if (data[2] == 'C') {	/* TI */
+		ret = fg_mac_read_block(chip, FG_MAC_CMD_FW_VER, data, sizeof(data));
+		if (ret)
+			xmc_err("failed to get FG_MAC_CMD_FW_VER\n", chip->log_tag);
+
+		if ((data[3] == 0x0) && (data[4] == 0x1)) //R0 FW
+			return (((data_limetime3[15] << 8) | (data_limetime3[14] << 0)) << 2);
+		else if ((data[3] == 0x1) && (data[4] == 0x2)) //R1 FW
+			return (((data_limetime3[9] << 8) | (data_limetime3[8] << 0)) << 2);
+	} else if (data[2] == '4') {	/* NVT */
+		return ((data_limetime3[15] << 8) | (data_limetime3[14] << 0));
+	}
+
+	return 0;
+}
+
+static void fg_read_qmax(struct fg_chip *chip)
+{
+	u8 data[64] = {0};
+	int ret = 0;
+
+	if (chip->fac_no_bat || chip->rw_lock)
+		return;
+
+	ret = fg_mac_read_block(chip, FG_MAC_CMD_QMAX, data, 14);
+	if (ret) {
+		xmc_info("%s try to read QMAX\n", chip->log_tag);
+		fg_mac_read_block(chip, FG_MAC_CMD_QMAX, data, 20);
+	}
+
+	if (ret) {
+		xmc_info("%s failed to read QMAX\n", chip->log_tag);
+		return;
+	}
+
+	chip->qmax[0] = (data[1] << 8) | data[0];
+	chip->qmax[1] = (data[3] << 8) | data[2];
+}
+
+static void fg_read_itstatus1(struct fg_chip *chip)
+{
+	u8 data[64] = {0};
+	int t_sim = 0, ret = 0;
+
+	if (chip->fac_no_bat || chip->rw_lock)
+		return;
+
+	ret = fg_mac_read_block(chip, FG_MAC_CMD_ITSTATUS1, data, 20);
+	if (ret) {
+		xmc_info("%s failed to read itstatus1\n", chip->log_tag);
+		return;
+	}
+
+	chip->true_rem_q = (data[1] << 8) | data[0];
+	chip->initial_q = (data[5] << 8) | data[4];
+	chip->true_full_chg_q = (data[9] << 8) | data[8];
+	t_sim = (data[13] << 8) | data[12];
+	chip->t_sim = t_sim - 2730;
+}
+
+static void fg_read_itstatus2(struct fg_chip *chip)
+{
+	u8 data[64] = {0};
+	int ret = 0;
+
+	if (chip->fac_no_bat || chip->rw_lock)
+		return;
+
+	ret = fg_mac_read_block(chip, FG_MAC_CMD_ITSTATUS2, data, 20);
+	if (ret) {
+		xmc_info("%s failed to read itstatus2\n", chip->log_tag);
+		return;
+	}
+
+	chip->cell_grid = data[2];
+}
+
 static int fg_read_rsoc(struct fg_chip *chip)
 {
 	u16 soc = 0;
 	static u16 s_soc = 0;
 	bool retry = false;
 	int ret = 0;
+
+	if (chip->fac_no_bat)
+		return 50;
 
 	if (chip->rw_lock)
 		return s_soc ? s_soc : 50;
@@ -323,7 +466,7 @@ retry:
 		}
 	} else {
 		if (chip->i2c_error_count > 0)
-			chip->i2c_error_count--;
+			chip->i2c_error_count = 0;
 	}
 
 	s_soc = soc;
@@ -336,6 +479,9 @@ static int fg_read_temperature(struct fg_chip *chip)
 	static u16 s_tbat = 0;
 	bool retry = false;
 	int ret = 0;
+
+	if (chip->fac_no_bat)
+		return 250;
 
 	if (chip->rw_lock)
 		return s_tbat - 2730;
@@ -355,7 +501,7 @@ retry:
 		}
 	} else {
 		if (chip->i2c_error_count > 0)
-			chip->i2c_error_count--;
+			chip->i2c_error_count = 0;
 	}
 
 	s_tbat = tbat;
@@ -369,6 +515,9 @@ static int fg_read_volt(struct fg_chip *chip)
 	bool retry = false;
 	int ret = 0;
 
+	if (chip->fac_no_bat)
+		return 3800;
+
 	if (chip->rw_lock)
 		return s_vbat ? s_vbat : 3800;
 
@@ -381,17 +530,16 @@ retry:
 			goto retry;
 		} else {
 			xmc_err("%s failed to read VBAT\n", chip->log_tag);
-			vbat = (product_name == PISSARRO) ? 4000 : 8000;
+			vbat = s_vbat ? s_vbat : 3800;
 			if (chip->i2c_error_count < 10)
 				chip->i2c_error_count++;
 		}
 	} else {
 		if (chip->i2c_error_count > 0)
-			chip->i2c_error_count--;
+			chip->i2c_error_count = 0;
 	}
 
 	s_vbat = vbat;
-
 	return vbat;
 }
 
@@ -401,6 +549,9 @@ static int fg_read_current(struct fg_chip *chip)
 	static s16 s_ibat = 0;
 	bool retry = false;
 	int ret = 0;
+
+	if (chip->fac_no_bat)
+		return 0;
 
 	if (chip->rw_lock)
 		return s_ibat;
@@ -414,17 +565,16 @@ retry:
 			goto retry;
 		} else {
 			xmc_err("%s failed to read IBAT\n", chip->log_tag);
-			ibat = 0;
+			ibat = s_ibat;
 			if (chip->i2c_error_count < 10)
 				chip->i2c_error_count++;
 		}
 	} else {
 		if (chip->i2c_error_count > 0)
-			chip->i2c_error_count--;
+			chip->i2c_error_count = 0;
 	}
 
 	s_ibat = ibat = -1 * ibat;
-
 	return ibat;
 }
 
@@ -434,6 +584,9 @@ static int fg_read_fcc(struct fg_chip *chip)
 	static u16 s_fcc = 0;
 	bool retry = false;
 	int ret = 0;
+
+	if (chip->fac_no_bat)
+		return chip->typical_capacity;
 
 	if (chip->rw_lock)
 		return s_fcc;
@@ -447,13 +600,13 @@ retry:
 			goto retry;
 		} else {
 			xmc_err("%s failed to read FCC\n", chip->log_tag);
-			fcc = (product_name == PISSARRO) ? 5160 : 4500;
+			fcc = s_fcc;
 			if (chip->i2c_error_count < 10)
 				chip->i2c_error_count++;
 		}
 	} else {
 		if (chip->i2c_error_count > 0)
-			chip->i2c_error_count--;
+			chip->i2c_error_count = 0;
 	}
 
 	s_fcc = fcc;
@@ -467,6 +620,9 @@ static int fg_read_rm(struct fg_chip *chip)
 	bool retry = false;
 	int ret = 0;
 
+	if (chip->fac_no_bat)
+		return chip->typical_capacity / 2;
+
 	if (chip->rw_lock)
 		return s_rm;
 
@@ -479,13 +635,13 @@ retry:
 			goto retry;
 		} else {
 			xmc_err("%s failed to read RM\n", chip->log_tag);
-			rm = (product_name == PISSARRO) ? 2580 : 2250;
+			rm = s_rm;
 			if (chip->i2c_error_count < 10)
 				chip->i2c_error_count++;
 		}
 	} else {
 		if (chip->i2c_error_count > 0)
-			chip->i2c_error_count--;
+			chip->i2c_error_count = 0;
 	}
 
 	s_rm = rm;
@@ -499,6 +655,9 @@ static int fg_read_dc(struct fg_chip *chip)
 	bool retry = false;
 	int ret = 0;
 
+	if (chip->fac_no_bat)
+		return chip->typical_capacity;
+
 	if (chip->rw_lock)
 		return s_dc;
 
@@ -511,20 +670,19 @@ retry:
 			goto retry;
 		} else {
 			xmc_err("%s failed to read DC\n", chip->log_tag);
-			dc = (product_name == PISSARRO) ? 5160 : 4500;
+			dc = s_dc;
 			if (chip->i2c_error_count < 10)
 				chip->i2c_error_count++;
 		}
 	} else {
 		if (chip->i2c_error_count > 0)
-			chip->i2c_error_count--;
+			chip->i2c_error_count = 0;
 	}
 
 	s_dc = dc;
 	return dc;
 }
 
-/*
 static int fg_read_soh(struct fg_chip *chip)
 {
 	u16 soh = 0;
@@ -533,7 +691,7 @@ static int fg_read_soh(struct fg_chip *chip)
 	int ret = 0;
 
 	if (chip->rw_lock)
-		return s_soh;
+		return s_soh ? s_soh : 90;
 
 retry:
 	ret = fg_read_word(chip, chip->regs[BQ_FG_REG_SOH], &soh);
@@ -544,19 +702,18 @@ retry:
 			goto retry;
 		} else {
 			xmc_err("%s failed to read SOH\n", chip->log_tag);
-			soh = 50;
+			soh = s_soh ? s_soh : 90;
 			if (chip->i2c_error_count < 10)
 				chip->i2c_error_count++;
 		}
 	} else {
 		if (chip->i2c_error_count > 0)
-			chip->i2c_error_count--;
+			chip->i2c_error_count = 0;
 	}
 
 	s_soh = soh;
 	return soh;
 }
-*/
 
 static int fg_read_cyclecount(struct fg_chip *chip)
 {
@@ -564,6 +721,9 @@ static int fg_read_cyclecount(struct fg_chip *chip)
 	static u16 s_cc = 0;
 	bool retry = false;
 	int ret = 0;
+
+	if (chip->fac_no_bat)
+		return 0;
 
 	if (chip->rw_lock)
 		return s_cc;
@@ -583,11 +743,38 @@ retry:
 		}
 	} else {
 		if (chip->i2c_error_count > 0)
-			chip->i2c_error_count--;
+			chip->i2c_error_count = 0;
 	}
 
 	s_cc = cc;
 	return cc;
+}
+
+static bool fg_get_full(struct fg_chip *chip)
+{
+	u16 status = 0;
+	bool retry = false;
+	int ret = 0;
+
+retry:
+	ret = fg_read_word(chip, chip->regs[BQ_FG_REG_BATT_STATUS], &status);
+	if (ret < 0) {
+		if (!retry) {
+			retry = true;
+			msleep(10);
+			goto retry;
+		} else {
+			xmc_err("%s failed to read status\n", chip->log_tag);
+			status = 0;
+			if (chip->i2c_error_count < 10)
+				chip->i2c_error_count++;
+		}
+	} else {
+		if (chip->i2c_error_count > 0)
+			chip->i2c_error_count = 0;
+	}
+
+	return (bool)(status & BIT(5));
 }
 
 static void fg_clear_rw_lock(struct work_struct *work)
@@ -623,7 +810,7 @@ static int fg_get_property(struct power_supply *psy, enum power_supply_property 
 		val->intval = chip->chip_ok;
 		break;
 	case POWER_SUPPLY_PROP_AUTHENTIC:
-		val->intval = 1;
+		val->intval = chip->authenticate;
 		break;
 	case POWER_SUPPLY_PROP_TECHNOLOGY:
 		val->intval = POWER_SUPPLY_TECHNOLOGY_LIPO;
@@ -722,6 +909,134 @@ static int fg_register_psy(struct fg_chip *chip)
 	return 0;
 }
 
+static int fg_ops_get_soh(struct xmc_device *dev, int *value)
+{
+	struct fg_chip *chip = (struct fg_chip *)xmc_ops_get_data(dev);
+
+	*value = fg_read_soh(chip);
+	return 0;
+}
+
+static int fg_ops_get_temp_max(struct xmc_device *dev, int *value)
+{
+	struct fg_chip *chip = (struct fg_chip *)xmc_ops_get_data(dev);
+
+	*value = fg_read_temp_max(chip);
+	return 0;
+}
+
+static int fg_ops_get_time_ot(struct xmc_device *dev, int *value)
+{
+	struct fg_chip *chip = (struct fg_chip *)xmc_ops_get_data(dev);
+
+	*value = fg_read_time_ot(chip);
+	return 0;
+}
+
+static int fg_ops_get_gauge_full(struct xmc_device *dev, bool *value)
+{
+	struct fg_chip *chip = (struct fg_chip *)xmc_ops_get_data(dev);
+
+	*value = fg_get_full(chip);
+	return 0;
+}
+
+static int fg_ops_set_fast_charge(struct xmc_device *dev, bool enable)
+{
+	struct fg_chip *chip = (struct fg_chip *)xmc_ops_get_data(dev);
+
+	return fg_set_fast_charge(chip, enable);
+}
+
+static int fg_ops_set_shutdown_mode(struct xmc_device *dev)
+{
+	struct fg_chip *chip = (struct fg_chip *)xmc_ops_get_data(dev);
+
+	return fg_set_shutdown_mode(chip);
+}
+
+static int fg_ops_get_qmax(struct xmc_device *dev, int *value, int cell)
+{
+	struct fg_chip *chip = (struct fg_chip *)xmc_ops_get_data(dev);
+
+	fg_read_qmax(chip);
+	*value = chip->qmax[cell];
+
+	return 0;
+}
+
+static int fg_ops_get_true_rem_q(struct xmc_device *dev, int *value)
+{
+	struct fg_chip *chip = (struct fg_chip *)xmc_ops_get_data(dev);
+
+	fg_read_itstatus1(chip);
+	*value = chip->true_rem_q;
+
+	return 0;
+}
+
+static int fg_ops_get_initial_q(struct xmc_device *dev, int *value)
+{
+	struct fg_chip *chip = (struct fg_chip *)xmc_ops_get_data(dev);
+
+	*value = chip->initial_q;
+
+	return 0;
+}
+
+static int fg_ops_get_true_full_chg_q(struct xmc_device *dev, int *value)
+{
+	struct fg_chip *chip = (struct fg_chip *)xmc_ops_get_data(dev);
+
+	*value = chip->true_full_chg_q;
+
+	return 0;
+}
+
+static int fg_ops_get_t_sim(struct xmc_device *dev, int *value)
+{
+	struct fg_chip *chip = (struct fg_chip *)xmc_ops_get_data(dev);
+
+	*value = chip->t_sim;
+
+	return 0;
+}
+
+static int fg_ops_get_cell_grid(struct xmc_device *dev, int *value)
+{
+	struct fg_chip *chip = (struct fg_chip *)xmc_ops_get_data(dev);
+
+	fg_read_itstatus2(chip);
+	*value = chip->cell_grid;
+
+	return 0;
+}
+
+static int fg_ops_get_rsoc(struct xmc_device *dev, int *value)
+{
+	struct fg_chip *chip = (struct fg_chip *)xmc_ops_get_data(dev);
+
+	*value = fg_read_rsoc(chip);
+
+	return 0;
+}
+
+static const struct xmc_ops fg_ops = {
+	.get_gauge_soh = fg_ops_get_soh,
+	.get_gauge_temp_max = fg_ops_get_temp_max,
+	.get_gauge_time_ot = fg_ops_get_time_ot,
+	.get_gauge_full = fg_ops_get_gauge_full,
+	.set_gauge_fast_charge = fg_ops_set_fast_charge,
+	.set_gauge_shutdown_mode = fg_ops_set_shutdown_mode,
+	.get_gauge_qmax = fg_ops_get_qmax,
+	.get_gauge_true_rem_q = fg_ops_get_true_rem_q,
+	.get_gauge_initial_q = fg_ops_get_initial_q,
+	.get_gauge_true_full_chg_q = fg_ops_get_true_full_chg_q,
+	.get_gauge_t_sim = fg_ops_get_t_sim,
+	.get_gauge_cell_grid = fg_ops_get_cell_grid,
+	.get_rsoc = fg_ops_get_rsoc,
+};
+
 int fg_stringtohex(char *str, unsigned char *out, unsigned int *outlen)
 {
 	char *p = str;
@@ -752,7 +1067,10 @@ static ssize_t fg_verify_digest_show(struct device *dev, struct device_attribute
 	u8 digest_buf[4] = {0};
 	int len = 0, i = 0;
 
-	if (chip->device_name == FG_BQ27Z561) {
+	if (chip->fac_no_bat)
+		return 0;
+
+	if (chip->device_name == FG_BQ27Z561 || chip->device_name == FG_NFG1000A || chip->device_name == FG_NFG1000B) {
 		for (i = 0; i < RANDOM_CHALLENGE_LEN_BQ27Z561; i++) {
 			memset(digest_buf, 0, sizeof(digest_buf));
 			snprintf(digest_buf, sizeof(digest_buf) - 1, "%02x", chip->digest[i]);
@@ -784,6 +1102,9 @@ ssize_t fg_verify_digest_store(struct device *dev, struct device_attribute *attr
 	struct timespec64 time_now;
 	static bool once_flag = false;
 
+	if (chip->fac_no_bat)
+		return count;
+
 	if (!once_flag) {
 		once_flag = true;
 		ktime_now = ktime_get_boottime();
@@ -799,7 +1120,7 @@ ssize_t fg_verify_digest_store(struct device *dev, struct device_attribute *attr
 	memset(kbuf, 0, sizeof(kbuf));
 	strncpy(kbuf, buf, count - 1);
 	fg_stringtohex(kbuf, random, &i);
-	if (chip->device_name == FG_BQ27Z561)
+	if (chip->device_name == FG_BQ27Z561 || chip->device_name == FG_NFG1000A || chip->device_name == FG_NFG1000B)
 		fg_sha256_auth(chip, random, RANDOM_CHALLENGE_LEN_BQ27Z561);
 	else if (chip->device_name == FG_BQ28Z610)
 		fg_sha256_auth(chip, random, RANDOM_CHALLENGE_LEN_BQ28Z610);
@@ -807,10 +1128,10 @@ ssize_t fg_verify_digest_store(struct device *dev, struct device_attribute *attr
 	return count;
 }
 
-static DEVICE_ATTR(verify_digest, S_IRUGO | S_IWUSR, fg_verify_digest_show, fg_verify_digest_store);
+static DEVICE_ATTR(fg_verify_digest, S_IRUGO | S_IWUSR, fg_verify_digest_show, fg_verify_digest_store);
 
 static struct attribute *fg_attributes[] = {
-	&dev_attr_verify_digest.attr,
+	&dev_attr_fg_verify_digest.attr,
 	NULL,
 };
 
@@ -821,11 +1142,15 @@ static const struct attribute_group fg_attr_group = {
 static int fg_parse_dt(struct fg_chip *chip)
 {
 	struct device_node *node = chip->dev->of_node;
-	int ret = 0;
+	int size = 0, ret = 0;
 
 	chip->enable_shutdown_delay = of_property_read_bool(node, "enable_shutdown_delay");
 
-	if (product_name == PISSARRO) {
+	if (chip->device_name == FG_BQ27Z561 || chip->device_name == FG_NFG1000A || chip->device_name == FG_NFG1000B) {
+		ret = of_property_read_u32(node, "typical_capacity_1s", &chip->typical_capacity);
+		if (ret)
+			xmc_err("%s failed to parse typical_capacity_1s\n", chip->log_tag);
+
 		ret = of_property_read_u32(node, "normal_shutdown_vbat_1s", &chip->normal_shutdown_vbat);
 		if (ret)
 			xmc_err("%s failed to parse normal_shutdown_vbat_1s\n", chip->log_tag);
@@ -834,13 +1159,33 @@ static int fg_parse_dt(struct fg_chip *chip)
 		if (ret)
 			xmc_err("%s failed to parse critical_shutdown_vbat_1s\n", chip->log_tag);
 
-		ret = of_property_read_u32(node, "report_full_rsoc_1s", &chip->report_full_rsoc);
+		ret = of_property_read_u32(node, "report_full_rawsoc_1s", &chip->report_full_rawsoc);
 		if (ret)
-			xmc_err("%s failed to parse report_full_rsoc_1s\n", chip->log_tag);
+			xmc_err("%s failed to parse report_full_rawsoc_1s\n", chip->log_tag);
 
 		ret = of_property_read_u32(node, "soc_gap_1s", &chip->soc_gap);
 		if (ret)
 			xmc_err("%s failed to parse soc_gap_1s\n", chip->log_tag);
+
+		of_get_property(node, "soc_decimal_rate_1s", &size);
+		if (size) {
+			chip->dec_rate_seq = devm_kzalloc(chip->dev, size, GFP_KERNEL);
+			if (chip->dec_rate_seq) {
+				chip->dec_rate_len = (size / sizeof(*chip->dec_rate_seq));
+
+				if (chip->dec_rate_len % 2) {
+					xmc_err("%s invalid soc decimal rate seq\n", chip->log_tag);
+					return -1;
+				}
+				of_property_read_u32_array(node, "soc_decimal_rate_1s", chip->dec_rate_seq, chip->dec_rate_len);
+			} else {
+				xmc_err("%s failed to allocating memory for soc_decimal_rate_1s\n", chip->log_tag);
+				return -1;
+			}
+		} else {
+			xmc_err("%s failed to get soc_decimal_rate_1s\n", chip->log_tag);
+			return -1;
+		}
 	} else {
 		ret = of_property_read_u32(node, "normal_shutdown_vbat_2s", &chip->normal_shutdown_vbat);
 		if (ret)
@@ -850,9 +1195,9 @@ static int fg_parse_dt(struct fg_chip *chip)
 		if (ret)
 			xmc_err("%s failed to parse critical_shutdown_vbat_2s\n", chip->log_tag);
 
-		ret = of_property_read_u32(node, "report_full_rsoc_2s", &chip->report_full_rsoc);
+		ret = of_property_read_u32(node, "report_full_rawsoc_2s", &chip->report_full_rawsoc);
 		if (ret)
-			xmc_err("%s failed to parse report_full_rsoc_2s\n", chip->log_tag);
+			xmc_err("%s failed to parse report_full_rawsoc_2s\n", chip->log_tag);
 
 		ret = of_property_read_u32(node, "soc_gap_2s", &chip->soc_gap);
 		if (ret)
@@ -889,21 +1234,21 @@ static int fg_check_device(struct fg_chip *chip)
 	if (ret)
 		xmc_info("[FG_UNKNOWN]failed to get FG_MAC_CMD_DEVICE_CHEM\n");
 
-	if (!strncmp(data1, "bq27z561", 8)) {
+	if (!strncmp(data1, "bq27z561", 8) || !strncmp(data1, "sn27z565", 8)) {
 		chip->device_name = FG_BQ27Z561;
-		strcat(chip->log_tag, "[FG_BQ27Z561_");
+		strcat(chip->log_tag, "[XMC_FG_BQ27Z561_");
 	} else if (!strncmp(data1, "nfg1000a", 8)) {
 		chip->device_name = FG_NFG1000A;
-		strcat(chip->log_tag, "[FG_NFG1000A_");
+		strcat(chip->log_tag, "[XMC_FG_NFG1000A_");
 	} else if (!strncmp(data1, "nfg1000b", 8)) {
 		chip->device_name = FG_NFG1000B;
-		strcat(chip->log_tag, "[FG_NFG1000B_");
+		strcat(chip->log_tag, "[XMC_FG_NFG1000B_");
 	} else if (!strncmp(data1, "bq28z610", 8)) {
 		chip->device_name = FG_BQ28Z610;
-		strcat(chip->log_tag, "[FG_BQ28Z610_");
+		strcat(chip->log_tag, "[XMC_FG_BQ28Z610_");
 	} else {
 		chip->device_name = FG_UNKNOWN;
-		strcat(chip->log_tag, "[FG_UNKNOWN_");
+		strcat(chip->log_tag, "[XMC_FG_UNKNOWN_");
 	}
 
 	if (!strncmp(&data3[1], "L", 1)) {
@@ -921,6 +1266,16 @@ static int fg_check_device(struct fg_chip *chip)
 		chip->chip_ok = true;
 	else
 		chip->chip_ok = false;
+
+#ifdef CONFIG_FACTORY_BUILD
+	if (!chip->chip_ok) {
+		xmc_info("%s factory test, force a FG type\n", chip->log_tag);
+		chip->device_name = FG_BQ27Z561;
+		chip->device_chem = CHEM_LWN;
+		chip->chip_ok = true;
+		chip->fac_no_bat = true;
+	}
+#endif
 
 	xmc_info("%s device_name = %s, manu_name = %s, device_chem = %s\n", chip->log_tag, data1, data2, data3);
 
@@ -941,8 +1296,15 @@ static int fg_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	memcpy(chip->regs, fg_regs, NUM_REGS);
 	chip->rw_lock = false;
 	chip->i2c_error_count = 0;
+	chip->fake_tbat = 8888;
 	mutex_init(&chip->i2c_rw_lock);
 	chip->gauge_wakelock = wakeup_source_register(chip->dev, "gauge_wakelock");
+
+	chip->regmap = devm_regmap_init_i2c(client, &fg_regmap_config);
+	if (IS_ERR(chip->regmap)) {
+		xmc_err("failed to allocate regmap\n");
+		return PTR_ERR(chip->regmap);
+	}
 
 	fg_check_device(chip);
 
@@ -957,6 +1319,8 @@ static int fg_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		xmc_err("%s failed to register psy\n", chip->log_tag);
 		return ret;
 	}
+
+	g_chip->gauge_dev = xmc_device_register("gauge", &fg_ops, chip);
 
 	INIT_DELAYED_WORK(&chip->clear_rw_lock_work, fg_clear_rw_lock);
 
@@ -975,8 +1339,11 @@ static int fg_suspend(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct fg_chip *chip = i2c_get_clientdata(client);
-
-	cancel_delayed_work(&chip->clear_rw_lock_work);
+	
+	if (chip->fac_no_bat)
+		return 0;
+	else
+		cancel_delayed_work(&chip->clear_rw_lock_work);
 
 	return 0;
 }

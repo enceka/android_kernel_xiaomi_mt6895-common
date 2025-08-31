@@ -1459,12 +1459,12 @@ int disp_aal_set_param(struct mtk_ddp_comp *comp, struct cmdq_pkt *handle,
 }
 
 #define PRINT_AAL_REG(x1, x2, x3, x4) \
-	pr_notice("[2]0x%x=0x%x 0x%x=0x%x 0x%x=0x%x 0x%x=0x%x\n", \
+	pr_notice("[2] AAL_DUMP 0x%x=0x%x 0x%x=0x%x 0x%x=0x%x 0x%x=0x%x\n", \
 		x1, readl(comp->regs + x1), x2, readl(comp->regs + x2), \
 		x3, readl(comp->regs + x3), x4, readl(comp->regs + x4))
 
 #define PRINT_AAL3_REG(x1, x2, x3, x4) \
-	pr_notice("[3]0x%x=0x%x 0x%x=0x%x 0x%x=0x%x 0x%x=0x%x\n", \
+	pr_notice("[3] AAL_DUMP 0x%x=0x%x 0x%x=0x%x 0x%x=0x%x 0x%x=0x%x\n", \
 		x1, readl(dre3_va + x1), x2, readl(dre3_va + x2), \
 		x3, readl(dre3_va + x3), x4, readl(dre3_va + x4))
 bool dump_reg(struct mtk_ddp_comp *comp, bool locked)
@@ -1784,6 +1784,19 @@ static bool disp_aal_write_dre3(struct mtk_ddp_comp *comp)
 	return true;
 }
 
+static void ddp_dre3_restore_blk_num(struct mtk_ddp_comp *comp)
+{
+	if (g_aal_fo->mtk_dre30_support) {
+		struct mtk_disp_aal *aal_data = comp_to_aal(comp);
+		int dre_blk_x_num = g_aal_init_regs.dre_blk_x_num;
+		int dre_blk_y_num = g_aal_init_regs.dre_blk_y_num;
+
+		mtk_aal_write_mask(aal_data->dre3_hw.va + DISP_AAL_DRE_BLOCK_INFO_01,
+			(dre_blk_y_num << 5) | dre_blk_x_num, ~0);
+		AALIRQ_LOG("end");
+	}
+}
+
 static void disp_aal_update_dre3_sram(struct mtk_ddp_comp *comp,
 	 bool check_sram)
 {
@@ -1824,6 +1837,22 @@ static void disp_aal_update_dre3_sram(struct mtk_ddp_comp *comp,
 	dre_blk_x_num = aal_min(AAL_DRE_BLK_NUM, read_value & 0x1F);
 	dre_blk_y_num =	aal_min(AAL_BLK_MAX_ALLOWED_NUM/dre_blk_x_num,
 		    (read_value >> 5) & 0x1F);
+	AALIRQ_LOG("read_value = 0x%08x", read_value);
+	AALIRQ_LOG("dre_blk_x_num = %d dre_blk_y_num = %d comp_id[%d]",
+				dre_blk_x_num, dre_blk_y_num, comp->id);
+	if (atomic_read(&g_aal_is_init_regs_valid) == 1) {
+		if (dre_blk_x_num != g_aal_init_regs.dre_blk_x_num
+			|| dre_blk_y_num != g_aal_init_regs.dre_blk_y_num) {
+			dre_blk_x_num = g_aal_init_regs.dre_blk_x_num;
+			dre_blk_y_num = g_aal_init_regs.dre_blk_y_num;
+			ddp_dre3_restore_blk_num(comp);
+			AALIRQ_LOG("reset dre_blk_x_num = %d dre_blk_y_num = %d comp_id[%d]",
+					dre_blk_x_num, dre_blk_y_num, comp->id);
+		}
+	} else {
+		AALERR("g_aal_is_init_regs_valid is not init");
+	}
+
 	if (spin_trylock_irqsave(&g_aal_hist_lock, flags)) {
 		result = disp_aal_read_dre3(comp,
 			dre_blk_x_num, dre_blk_y_num);
@@ -1877,7 +1906,7 @@ static void disp_aal_dre3_irq_handle(struct mtk_ddp_comp *comp)
 		return;
 
 	if (debug_dump_reg_irq)
-		debug_dump_reg_irq = !dump_reg(comp, true);
+		dump_reg(comp, true);
 
 	if (debug_skip_dre3_irq) {
 		pr_notice("skip dre3 irq for debug\n");
@@ -2224,10 +2253,13 @@ static void mtk_aal_stop(struct mtk_ddp_comp *comp, struct cmdq_pkt *handle)
 static void mtk_aal_bypass(struct mtk_ddp_comp *comp, int bypass,
 	struct cmdq_pkt *handle)
 {
-	AALFLOW_LOG("\n");
+	AALFLOW_LOG("bypass = %d\n", bypass);
 	cmdq_pkt_write(handle, comp->cmdq_base, comp->regs_pa + DISP_AAL_CFG,
 		bypass, 0x1);
 	atomic_set(&g_aal_force_relay, bypass);
+	if (bypass == 0) // Enable AAL Histogram
+		cmdq_pkt_write(handle, comp->cmdq_base,
+			comp->regs_pa + DISP_AAL_CFG, 0x3 << 1, (0x3 << 1));
 }
 
 static int mtk_aal_user_cmd(struct mtk_ddp_comp *comp, struct cmdq_pkt *handle,
@@ -2621,8 +2653,25 @@ void mtk_aal_dump(struct mtk_ddp_comp *comp)
 	void __iomem  *baddr = comp->regs;
 
 	DDPDUMP("== %s REGS:0x%x ==\n", mtk_dump_comp_str(comp), comp->regs_pa);
-	mtk_cust_dump_reg(baddr, 0x0, 0x20, 0x30, 0x4D8);
-	mtk_cust_dump_reg(baddr, 0x24, 0x28, 0x200, 0x10);
+	mtk_cust_dump_reg(baddr, 0x0, 0x8, 0x10, 0x20);
+	mtk_cust_dump_reg(baddr, 0x30, 0xFC, 0x160, 0x200);
+	mtk_cust_dump_reg(baddr, 0x204, 0x20C, 0x3B4, 0x45C);
+	mtk_cust_dump_reg(baddr, 0x460, 0x464, 0x468, 0x4D8);
+	mtk_cust_dump_reg(baddr, 0x4DC, 0x500, 0x224, 0x504);
+	if (g_aal_fo->mtk_dre30_support) {
+		void __iomem  *dre3_va = mtk_aal_dre3_va(comp);
+
+		DDPDUMP("dre30 dump\n");
+		mtk_cust_dump_reg(dre3_va, 0x0, 0x8, 0x10, 0x20);
+		mtk_cust_dump_reg(dre3_va, 0x30, 0x34, 0x38, 0xC4);
+		mtk_cust_dump_reg(dre3_va, 0xC8, 0xF4, 0xF8, 0x200);
+		mtk_cust_dump_reg(dre3_va, 0x204, 0x45C, 0x460, 0x464);
+		mtk_cust_dump_reg(dre3_va, 0x468, 0x46C, 0x470, 0x474);
+		mtk_cust_dump_reg(dre3_va, 0x478, 0x480, 0x484, 0x488);
+		mtk_cust_dump_reg(dre3_va, 0x48C, 0x490, 0x494, 0x498);
+		mtk_cust_dump_reg(dre3_va, 0x49C, 0x4B4, 0x4B8, 0x4BC);
+		mtk_cust_dump_reg(dre3_va, 0x4D4, 0x4EC, 0x4F0, 0x53C);
+	}
 }
 
 void disp_aal_on_end_of_frame(struct mtk_ddp_comp *comp)
@@ -3223,8 +3272,8 @@ void disp_aal_debug(const char *opt)
 		debug_bypass_alg_mode = strncmp(opt + 12, "bypass", 6) == 0;
 		pr_notice("[debug] bypass_alg_mode=%d\n",
 			debug_bypass_alg_mode);
-	} else if (strncmp(opt, "dumpregirq", 10) == 0) {
-		debug_dump_reg_irq = true;
+	} else if (strncmp(opt, "dumpregirq:", 11) == 0) {
+		debug_dump_reg_irq = strncmp(opt + 11, "1", 1) == 0;
 		pr_notice("[debug] debug_dump_reg_irq=%d\n",
 			debug_dump_reg_irq);
 	} else if (strncmp(opt, "dumpdre3hist:", 13) == 0) {

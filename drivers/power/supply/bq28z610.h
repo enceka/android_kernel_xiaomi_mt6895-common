@@ -129,6 +129,7 @@ struct bq_fg_chip {
 	struct i2c_client *client;
 	struct mutex i2c_rw_lock;
 	struct mutex data_lock;
+	struct regmap *regmap;
 
 	u8 regs[NUM_REGS];
 	char model_name[I2C_NAME_SIZE];
@@ -188,6 +189,8 @@ struct bq_fg_chip {
 	bool	enable_shutdown_delay;
 	bool	shutdown_flag;
 	bool	shutdown_mode;
+	atomic_t fg_in_sleep;
+        int slave_connect_gpio;
 };
 
 #define BMS_SYSFS_FIELD_RW(_name, _prop)	\
@@ -222,7 +225,9 @@ enum bms_property {
 	BMS_PROP_RESISTANCE,
 	BMS_PROP_I2C_ERROR_COUNT,
 	BMS_PROP_AV_CURRENT,
-	BMS_PROP_RAW_SOC,
+	BMS_PROP_TEMP_MAX,
+	BMS_PROP_TIME_OT,
+	BMS_PROP_BMS_SLAVE_CONNECT_ERROR,
 };
 
 struct mtk_bms_sysfs_field_info {

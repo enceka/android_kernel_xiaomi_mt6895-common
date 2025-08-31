@@ -1120,7 +1120,7 @@ static int wm_coeff_write_ctrl_raw(struct wm_coeff_ctl *ctl,
 			return ret;
 		}
 
-		adsp_dbg(dsp, "Wrote %zu bytes to %x\n", to_write, reg);
+		adsp_info(dsp, "Wrote %zu bytes to %x\n", to_write, reg);
 
 		temp += to_write;
 		reg += to_write / addr_div;
@@ -1251,7 +1251,7 @@ static int wm_coeff_read_ctrl_raw(struct wm_coeff_ctl *ctl,
 			return ret;
 		}
 
-		adsp_dbg(dsp, "Read %zu bytes from %x\n", to_read, reg);
+		adsp_info(dsp, "Read %zu bytes from %x\n", to_read, reg);
 
 		temp += to_read;
 		reg += to_read / addr_div;
@@ -2238,16 +2238,6 @@ static struct wm_coeff_ctl *wm_adsp_get_ctl(struct wm_adsp *dsp,
 	struct wm_coeff_ctl *pos, *rslt = NULL;
 
 	list_for_each_entry(pos, &dsp->ctl_list, list) {
-        /*
-        if (!strcmp(name, "ENABLE_FULL_US_BYPASS"))
-        {
-    		adsp_err(dsp, "pos->subname is %s, pos->subname_len is %d, pos->enabled is %d\n", 
-                     pos->subname, pos->subname_len, pos->enabled);
-    		adsp_err(dsp, "pos->alg_region.alg is %d, alg is %d, pos->alg_region.type is %d, type is %d\n", 
-                     pos->alg_region.alg, alg, pos->alg_region.type, type);
-        }
-        */
-
 		if (!pos->subname)
 			continue;
 		if (strncmp(pos->subname, name, pos->subname_len) == 0 &&
@@ -3335,6 +3325,8 @@ static void wm_adsp_boot_work(struct work_struct *work)
 	if (ret != 0)
 		goto err_ena;
 
+	//wm_halo_apply_calibration(dsp);
+
 	ret = dsp->ops->setup_algs(dsp);
 	if (ret != 0)
 		goto err_ena;
@@ -3576,6 +3568,8 @@ int wm_adsp_event(struct snd_soc_dapm_widget *w,
 			ret = -EIO;
 			goto err;
 		}
+		
+		wm_halo_apply_calibration(dsp);
 
 		if (dsp->ops->enable_core) {
 			ret = dsp->ops->enable_core(dsp);
@@ -3583,7 +3577,6 @@ int wm_adsp_event(struct snd_soc_dapm_widget *w,
 				goto err;
 		}
 
-		wm_halo_apply_calibration(w);
 		
 		/* Sync set controls */
 		ret = wm_coeff_sync_controls(dsp);

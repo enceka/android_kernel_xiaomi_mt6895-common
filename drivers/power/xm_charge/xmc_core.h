@@ -15,8 +15,12 @@
 #define MAX_BBC_DRIVER_NUM	3
 #define THERMAL_TABLE_NUM	6
 #define THERMAL_LEVEL_NUM	16
-#define STEP_JEITA_TUPLE_NUM	6
+#define STEP_JEITA_TUPLE_NUM	7
 #define VOTE_CHARGER_TYPE_NUM	9
+
+#define CHARGE_MONITOR_DELAY	3000
+#define NOTCHARGE_MONITOR_DELAY	20000
+#define FAST_MONITOR_DELAY	5000
 
 #define RANDOM_CHALLENGE_LEN_MAX	32
 #define RANDOM_CHALLENGE_LEN_BQ27Z561	32
@@ -31,7 +35,7 @@
 #define USBPD_UVDM_HDR(svid, cmd0, cmd1)	(((svid) << 16) | (0 << 15) | ((cmd0) << 8) | (cmd1))
 #define USBPD_UVDM_HDR_CMD(hdr)			((hdr) & 0xFF)
 
-#define cut_cap(value, min, max)	((min > value) ? min : ((value > max) ? max : value))
+#define cut_cap(value, min, max)	((min > (value)) ? min : (((value) > (max)) ? (max) : (value)))
 
 #define is_between(left, right, value)				\
 		(((left) >= (right) && (left) >= (value)	\
@@ -70,25 +74,11 @@ enum charge_pump {
 	CPC_LN8410,
 };
 
-enum cp_div_type {
-	CPDT_NULL,
-	CPDT_2T1,
-	CPDT_4T2,
-	CPDT_4T1,
-};
-
 enum cp_com_type {
 	CPCT_NULL,
 	CPCT_SINGLE,
 	CPCT_SERIAL,
 	CPCT_PARALLEL,
-};
-
-enum cp_operate_mode {
-	CP_MODE_NULL,
-	CP_MODE_BYPASS,
-	CP_MODE_2T1,
-	CP_MODE_4T1,
 };
 
 enum third_cp {
@@ -133,25 +123,57 @@ enum pdm_sm_status {
 	PDM_STATUS_EXIT,
 };
 
+enum quick_charge_type {
+	QUICK_CHARGE_NONE = 0,
+	QUICK_CHARGE_NORMAL = 0,
+	QUICK_CHARGE_FAST,
+	QUICK_CHARGE_FLASH,
+	QUICK_CHARGE_TURBE,
+	QUICK_CHARGE_SUPER,
+	QUICK_CHARGE_MAX,
+};
+
 enum xmc_sysfs_prop {
 	/* /sys/power_supply/usb */
-	POWER_SUPPLY_PROP_USB_BEGIN,		/* This is begin of usb node, don't modify it */
 	POWER_SUPPLY_PROP_REAL_TYPE,
 	POWER_SUPPLY_PROP_QUICK_CHARGE_TYPE,
 	POWER_SUPPLY_PROP_TYPEC_MODE,
 	POWER_SUPPLY_PROP_CONNECTOR_TEMP,
 	POWER_SUPPLY_PROP_TYPEC_CC_ORIENTATION,
 	POWER_SUPPLY_PROP_PD_AUTHENTICATION,
-	POWER_SUPPLY_PROP_INPUT_SUSPEND,
-	POWER_SUPPLY_PROP_USB_END,		/* This is end of usb node, don't modify it */
+	POWER_SUPPLY_PROP_APDO_MAX,
+	POWER_SUPPLY_PROP_POWER_MAX,
+	POWER_SUPPLY_PROP_FFC_ENABLE,
+	POWER_SUPPLY_PROP_INPUT_SUSPEND_USB,
+	POWER_SUPPLY_PROP_MTBF_TEST,
+
+	/* /sys/power_supply/battery */
+	POWER_SUPPLY_PROP_INPUT_SUSPEND_BATTERY,
+	POWER_SUPPLY_PROP_NIGHT_CHARGING,
+	POWER_SUPPLY_PROP_SMART_BATT,
 
 	/* /sys/power_supply/bms */
-	POWER_SUPPLY_PROP_BMS_BEGIN,		/* This is begin of bms node, don't modify it */
 	POWER_SUPPLY_PROP_FASTCHARGE_MODE,
 	POWER_SUPPLY_PROP_RESISTANCE_ID,
 	POWER_SUPPLY_PROP_SOC_DECIMAL,
 	POWER_SUPPLY_PROP_SOC_DECIMAL_RATE,
-	POWER_SUPPLY_PROP_BMS_END,		/* This is end of bms node, don't modify it */
+	POWER_SUPPLY_PROP_SHUTDOWN_DELAY,
+	POWER_SUPPLY_PROP_SHUTDOWN_MODE,
+	POWER_SUPPLY_PROP_SOH,
+	POWER_SUPPLY_PROP_RM,
+	POWER_SUPPLY_PROP_FCC,
+	POWER_SUPPLY_PROP_MAX_TEMP,
+	POWER_SUPPLY_PROP_TIME_OT,
+	POWER_SUPPLY_PROP_QMAX0,
+	POWER_SUPPLY_PROP_QMAX1,
+	POWER_SUPPLY_PROP_TRUE_REM_Q,
+	POWER_SUPPLY_PROP_INITIAL_Q,
+	POWER_SUPPLY_PROP_TRUE_FULL_CHG_Q,
+	POWER_SUPPLY_PROP_T_SIM,
+	POWER_SUPPLY_PROP_CELL_GRID,
+	POWER_SUPPLY_PROP_CHIP_OK,
+	POWER_SUPPLY_PROP_RSOC,
+	POWER_SUPPLY_PROP_CAPACITY_RAW,
 };
 
 struct chip_list {
@@ -159,7 +181,6 @@ struct chip_list {
 	int gauge_chip;
 	int buck_boost;
 	int charge_pump[MAX_CP_DRIVER_NUM];
-	int cp_div_type;
 	int cp_com_type;
 	int third_cp;
 	int bc12_qc_chip;
@@ -188,10 +209,6 @@ struct pdm_dts_config {
 	int	cv_vbat;
 	int	cv_vbat_ffc;
 	int	cv_ibat;
-	int	min_pdo_vbus;
-	int	max_pdo_vbus;
-	int	max_bbc_vbus;
-	int	min_bbc_vbus;
 };
 
 struct pdm_chip {
@@ -202,42 +219,31 @@ struct pdm_chip {
 	spinlock_t psy_change_lock;
 
 	struct pdm_dts_config dts_config;
-	struct timespec64 last_switch_time;
 
 	enum pdm_sm_state state;
-	enum pdm_sm_state last_state;
 	enum pdm_sm_status sm_status;
-	enum power_supply_type psy_type;
+	enum xmc_cp_div_mode div_mode;
+	enum xmc_cp_div_mode master_cp_mode;
+	enum xmc_cp_div_mode slave_cp_mode;
 	bool	pdm_active;
 	bool	psy_change_running;
 	bool	master_cp_enable;
-	bool	master_cp_bypass;
 	bool	slave_cp_enable;
-	bool	slave_cp_bypass;
-	bool	bypass_enable;
-	bool	cp_bypass_support;
-	bool	pdo_bypass_support;
-	bool	switch_mode;
 	bool	disable_slave;
-	bool	ffc_enable;
-	bool	input_suspend;
-	bool	typec_burn;
 	bool	no_delay;
+	int	div_rate;
 	int	master_cp_ibus;
 	int	slave_cp_ibus;
 	int	total_ibus;
-	int	jeita_chg_index;
+	int	fv;
 	int	soc;
 	int	ibat;
 	int	vbat;
 	int	target_fcc;
 	int	thermal_limit_fcc;
-	int	sic_limit_fcc;
 	int	step_chg_fcc;
-	int	bbc_vbus;
-	int	bbc_ibus;
 	int	master_cp_vbus;
-	int	sw_cv;
+	int	slave_cp_vbus;
 	int	vbus_step;
 	int	ibus_step;
 	int	ibat_step;
@@ -248,25 +254,18 @@ struct pdm_chip {
 	int	retry_count;
 	int	entry_vbus;
 	int	entry_ibus;
-	int	vbus_low_gap;
-	int	vbus_high_gap;
-	int	ibus_gap;
 	int	tune_vbus_count;
-	int	adapter_adjust_count;
 	int	enable_cp_count;
 	int	enable_cp_fail_count;
 	int	taper_count;
-	int	cv_wa_count;
 	int	low_ibus_count;
 	int	bms_i2c_error_count;
 
+	int	select_index;
 	int	apdo_max_vbus;
 	int	apdo_min_vbus;
 	int	apdo_max_ibus;
 	int	apdo_max_watt;
-	int	bypass_entry_fcc;
-	int	bypass_exit_fcc;
-	struct	xmc_pd_cap cap;
 
 	int	vbus_control_gpio;
 };
@@ -307,12 +306,14 @@ struct fg_chip {
 	struct device *dev;
 	struct i2c_client *client;
 	struct mutex i2c_rw_lock;
+	struct regmap *regmap;
 
 	u8 regs[30];
 	char log_tag[50];
 	enum fg_device_chem device_chem;
 	enum fg_device_name device_name;
 	bool chip_ok;
+	bool fac_no_bat;
 	bool rw_lock;
 	int i2c_error_count;
 
@@ -322,19 +323,42 @@ struct fg_chip {
 	u8 digest[RANDOM_CHALLENGE_LEN_MAX];
 	bool authenticate;
 
-	int	report_full_rsoc;
-	int	soc_gap;
-	int	normal_shutdown_vbat;
-	int	critical_shutdown_vbat;
-	bool	enable_shutdown_delay;
+	int typical_capacity;
+	int report_full_rawsoc;
+	int soc_gap;
+	int normal_shutdown_vbat;
+	int critical_shutdown_vbat;
+	bool enable_shutdown_delay;
+	int *dec_rate_seq;
+	int dec_rate_len;
 
+	int qmax[2];
+	int true_rem_q;
+	int initial_q;
+	int true_full_chg_q;
+	int t_sim;
+	int cell_grid;
+
+	int plugin_soc;
+	int fake_uisoc;
 	int uisoc;
 	int rsoc;
+	int rawsoc;
 	int ibat;
 	int vbat;
+	int fake_vbat;
 	int tbat;
+	int fake_tbat;
+	int rm;
+	int fcc;
+	int soh;
 	int cycle_count;
 	bool gauge_full;
+	bool fast_charge;
+	bool shutdown_mode;
+	bool shutdown_delay;
+	bool shutdown_flag;
+	bool connector_remove;
 };
 
 struct adapter_desc {
@@ -343,6 +367,7 @@ struct adapter_desc {
 	uint32_t adapter_fw_ver;
 	uint32_t adapter_hw_ver;
 
+	struct xmc_pd_cap cap;
 	enum uvdm_state uvdm_state;
 	int version;
 	int temp;
@@ -350,9 +375,10 @@ struct adapter_desc {
 	uint8_t power_role; /* phone's power_role */
 	uint8_t data_role; /* phone's data_role */
 	uint8_t current_state;
+	int apdo_max;
 
 	bool authenticate_success;
-	bool authenticate_process;
+	bool authenticate_done;
 	bool reauth;
 	unsigned long s_secert[USBPD_UVDM_SS_LEN];
 	unsigned long digest[USBPD_UVDM_SS_LEN];
@@ -360,9 +386,28 @@ struct adapter_desc {
 
 struct buck_boost_desc {
 	bool charge_enable;
+	bool charge_done;
 	bool input_enable;
+	bool vbus_disable;
 	int vbus;
 	int ibus;
+	int vbat;
+	int state;
+	bool mivr;
+};
+
+enum bbc_state {
+	CHG_STAT_SLEEP,
+	CHG_STAT_VBUS_RDY,
+	CHG_STAT_TRICKLE,
+	CHG_STAT_PRE,
+	CHG_STAT_FAST,
+	CHG_STAT_EOC,
+	CHG_STAT_BKGND,
+	CHG_STAT_DONE,
+	CHG_STAT_FAULT,
+	CHG_STAT_OTG = 15,
+	CHG_STAT_MAX,
 };
 
 struct usb_typec_desc {
@@ -374,8 +419,11 @@ struct usb_typec_desc {
 
 	struct regulator *vbus_control;
 	struct wakeup_source *burn_wakelock;
+	struct wakeup_source *otg_wakelock;
+	struct wakeup_source *attach_wakelock;
 	int temp;
 	int fake_temp;
+	bool otg_boost;
 	bool cmd_input_suspend;
 	bool water_detect;
 	bool burn_detect;
@@ -391,9 +439,9 @@ struct charge_chip {
 	struct delayed_work main_monitor_work;
 	struct delayed_work second_monitor_work;
 	struct delayed_work burn_monitor_work;
+	struct delayed_work audio_adapter_wa_work;
 	struct wakeup_source *charger_present_wakelock;
-	int main_monitor_delay;
-	int second_monitor_delay;
+	int monitor_count;
 
 	struct chip_list chip_list;
 	struct feature_list feature_list;
@@ -429,19 +477,23 @@ struct charge_chip {
 	struct buck_boost_desc bbc;
 	struct usb_typec_desc usb_typec;
 
+	bool ffc_enable;
 	int fv;
-	int ffc_fv;
-	int bbc_max_fcc;
-	int bbc_max_icl;
+	int fv_ffc;
+	int iterm;
+	int iterm_ffc_cool;
+	int iterm_ffc_warm;
+	int fv_effective;
+	int iterm_effective;
 	int fcc[VOTE_CHARGER_TYPE_NUM];
 	int icl[VOTE_CHARGER_TYPE_NUM];
 	int mivr[VOTE_CHARGER_TYPE_NUM];
 
+	bool step_cv;
 	int step_fallback_hyst;
 	int step_forward_hyst;
 	int jeita_fallback_hyst;
 	int jeita_forward_hyst;
-	int cycle_count_threshold;
 	int jeita_hysteresis;
 	int step_index[2];
 	int jeita_index[2];
@@ -450,18 +502,21 @@ struct charge_chip {
 	struct step_jeita_cfg1 jeita_fcc_cfg[STEP_JEITA_TUPLE_NUM];
 
 	int thermal_limit[THERMAL_TABLE_NUM][THERMAL_LEVEL_NUM];
+	int thermal_level;
+	int sic_current;
 
 	bool resume;
-
-	bool input_suspend;
-	bool typec_burn;
-	bool battery_auth;
-
-	bool fg_full;
-	bool bbc_terminate;
+	bool init_done;
+	bool mtbf_test;
 	bool charge_full;
+	bool fake_full;
 	bool recharge;
-	int max_apdo;
+	bool can_charge;
+	bool charger_present;
+	bool fake_charger_present;
+
+	bool night_charging;
+	int smart_fv_shift;
 };
 
 extern bool max77932_init(void);
@@ -469,6 +524,7 @@ extern bool mp2762_init(void);
 extern bool bq27z561_init(struct charge_chip *chip);
 extern bool sc8551_init(void);
 extern bool sc8561_init(void);
+extern bool ln8410_init(void);
 extern bool ln8000_init(void);
 extern bool bq25980_init(void);
 extern bool xmusb350_init(void);
@@ -489,17 +545,17 @@ extern int xmc_get_log_level(void);
 #define xmc_err(fmt, ...)					\
 do {								\
 	if (xmc_get_log_level() >= 0)				\
-		printk(KERN_ERR "[XMCHG] " fmt, ##__VA_ARGS__);	\
+		printk(KERN_ERR "[XMCHG]" fmt, ##__VA_ARGS__);	\
 } while (0)
 
 #define xmc_info(fmt, ...)					\
 do {								\
 	if (xmc_get_log_level() >= 1)				\
-		printk(KERN_ERR "[XMCHG] " fmt, ##__VA_ARGS__);	\
+		printk(KERN_ERR "[XMCHG]" fmt, ##__VA_ARGS__);	\
 } while (0)
 
 #define xmc_dbg(fmt, ...)					\
 do {								\
 	if (xmc_get_log_level() >= 2)				\
-		printk(KERN_ERR "[XMCHG] " fmt, ##__VA_ARGS__);	\
+		printk(KERN_ERR "[XMCHG]" fmt, ##__VA_ARGS__);	\
 } while (0)

@@ -32,7 +32,7 @@ static const unsigned int usb_extcon_cable[] = {
 	EXTCON_USB_HOST,
 	EXTCON_NONE,
 };
-static unsigned int global_role = 0;
+static global_role = 0;
 
 static void mtk_usb_extcon_update_role(struct work_struct *work)
 {
@@ -292,7 +292,7 @@ static int mtk_extcon_tcpc_notifier(struct notifier_block *nb,
 			mtk_usb_extcon_set_role(extcon, USB_ROLE_NONE);
 			mtk_usb_extcon_set_role(extcon, USB_ROLE_DEVICE);
 		} else if (noti->swap_state.new_role == PD_ROLE_DFP &&
-				extcon->c_role == USB_ROLE_DEVICE) {
+				(extcon->c_role == USB_ROLE_DEVICE || extcon->c_role == USB_ROLE_NONE || global_role != extcon->c_role)) {
 			dev_info(dev, "switch role to host\n");
 			mtk_usb_extcon_set_role(extcon, USB_ROLE_NONE);
 			mtk_usb_extcon_set_role(extcon, USB_ROLE_HOST);

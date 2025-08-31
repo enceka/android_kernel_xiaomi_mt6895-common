@@ -3,7 +3,7 @@
  * CPU-agnostic ARM page table allocator.
  *
  * Copyright (C) 2014 ARM Limited
- * copyrighr (C) 2022 XiaoMi, Inc.
+ *
  * Author: Will Deacon <will.deacon@arm.com>
  */
 
@@ -37,7 +37,7 @@
  * Calculate the right shift amount to get to the portion describing level l
  * in a virtual address mapped by the pagetable in d.
  */
-#define ARM_LPAE_LVL_SHIFT(l, d)						\
+#define ARM_LPAE_LVL_SHIFT(l,d)						\
 	(((ARM_LPAE_MAX_LEVELS - (l)) * (d)->bits_per_level) +		\
 	ilog2(sizeof(arm_lpae_iopte)))
 
@@ -53,15 +53,15 @@
  * Calculate the index at level l used to map virtual address a using the
  * pagetable in d.
  */
-#define ARM_LPAE_PGD_IDX(l, d)						\
+#define ARM_LPAE_PGD_IDX(l,d)						\
 	((l) == (d)->start_level ? (d)->pgd_bits - (d)->bits_per_level : 0)
 
-#define ARM_LPAE_LVL_IDX(a, l, d)						\
-	(((u64)(a) >> ARM_LPAE_LVL_SHIFT(l, d)) &			\
-	 ((1 << ((d)->bits_per_level + ARM_LPAE_PGD_IDX(l, d))) - 1))
+#define ARM_LPAE_LVL_IDX(a,l,d)						\
+	(((u64)(a) >> ARM_LPAE_LVL_SHIFT(l,d)) &			\
+	 ((1 << ((d)->bits_per_level + ARM_LPAE_PGD_IDX(l,d))) - 1))
 
 /* Calculate the block/page mapping size at level l for pagetable in d. */
-#define ARM_LPAE_BLOCK_SIZE(l, d)	(1ULL << ARM_LPAE_LVL_SHIFT(l, d))
+#define ARM_LPAE_BLOCK_SIZE(l,d)	(1ULL << ARM_LPAE_LVL_SHIFT(l,d))
 
 /* Page table bits */
 #define ARM_LPAE_PTE_TYPE_SHIFT		0
@@ -71,7 +71,7 @@
 #define ARM_LPAE_PTE_TYPE_TABLE		3
 #define ARM_LPAE_PTE_TYPE_PAGE		3
 
-#define ARM_LPAE_PTE_ADDR_MASK		GENMASK_ULL(47, 12)
+#define ARM_LPAE_PTE_ADDR_MASK		GENMASK_ULL(47,12)
 
 #define ARM_LPAE_PTE_NSTABLE		(((arm_lpae_iopte)1) << 63)
 #define ARM_LPAE_PTE_XN			(((arm_lpae_iopte)3) << 53)
@@ -135,9 +135,9 @@
 #define ARM_MALI_LPAE_MEMATTR_WRITE_ALLOC 0x8DULL
 
 /* IOPTE accessors */
-#define iopte_deref(pte, d) __va(iopte_to_paddr(pte, d))
+#define iopte_deref(pte,d) __va(iopte_to_paddr(pte, d))
 
-#define iopte_type(pte, l)					\
+#define iopte_type(pte,l)					\
 	(((pte) >> ARM_LPAE_PTE_TYPE_SHIFT) & ARM_LPAE_PTE_TYPE_MASK)
 
 #define iopte_prot(pte)	((pte) & ARM_LPAE_PTE_ATTR_MASK)
@@ -184,7 +184,7 @@ static phys_addr_t iopte_to_paddr(arm_lpae_iopte pte,
 	return (paddr | (paddr << (48 - 12))) & (ARM_LPAE_PTE_ADDR_MASK << 4);
 }
 
-static bool selftest_running;
+static bool selftest_running = false;
 
 static dma_addr_t __arm_lpae_dma_addr(void *pages)
 {
@@ -316,11 +316,12 @@ static int arm_lpae_init_pte(struct arm_lpae_io_pgtable *data,
 static arm_lpae_iopte arm_lpae_install_table(arm_lpae_iopte *table,
 					     arm_lpae_iopte *ptep,
 					     arm_lpae_iopte curr,
-					     struct io_pgtable_cfg *cfg)
+					     struct arm_lpae_io_pgtable *data)
 {
 	arm_lpae_iopte old, new;
+	struct io_pgtable_cfg *cfg = &data->iop.cfg;
 
-	new = __pa(table) | ARM_LPAE_PTE_TYPE_TABLE;
+	new = paddr_to_iopte(__pa(table), data) | ARM_LPAE_PTE_TYPE_TABLE;
 	if (cfg->quirks & IO_PGTABLE_QUIRK_ARM_NS)
 		new |= ARM_LPAE_PTE_NSTABLE;
 
@@ -381,7 +382,7 @@ static int __arm_lpae_map(struct arm_lpae_io_pgtable *data, unsigned long iova,
 		if (!cptep)
 			return -ENOMEM;
 
-		pte = arm_lpae_install_table(cptep, ptep, 0, cfg);
+		pte = arm_lpae_install_table(cptep, ptep, 0, data);
 		if (pte)
 			__arm_lpae_free_pages(cptep, tblsz, cfg);
 	} else if (!cfg->coherent_walk && !(pte & ARM_LPAE_PTE_SW_SYNC)) {
@@ -595,7 +596,7 @@ static size_t arm_lpae_split_blk_unmap(struct arm_lpae_io_pgtable *data,
 		__arm_lpae_init_pte(data, blk_paddr, pte, lvl, 1, &tablep[i]);
 	}
 
-	pte = arm_lpae_install_table(tablep, ptep, blk_pte, cfg);
+	pte = arm_lpae_install_table(tablep, ptep, blk_pte, data);
 	if (pte != blk_pte) {
 		__arm_lpae_free_pages(tablep, tablesz, cfg);
 		/*

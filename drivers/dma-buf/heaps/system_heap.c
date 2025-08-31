@@ -77,7 +77,11 @@ static gfp_t order_flags[] = {HIGH_ORDER_GFP, MID_ORDER_GFP, LOW_ORDER_GFP};
  * of order 0 pages can significantly improve the performance of many IOMMUs
  * by reducing TLB pressure and time spent updating page tables.
  */
+#if defined(CONFIG_IOMMU_IO_PGTABLE_ARMV7S) && !defined(CONFIG_64BIT) && !defined(CONFIG_ARM_LPAE)
 static const unsigned int orders[] = {8, 4, 0};
+#else
+static const unsigned int orders[] = {4, 0};
+#endif
 #define NUM_ORDERS ARRAY_SIZE(orders)
 struct dmabuf_page_pool *pools[NUM_ORDERS];
 

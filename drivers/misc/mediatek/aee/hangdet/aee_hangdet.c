@@ -32,6 +32,8 @@
 #include <mt-plat/mrdump.h>
 #include "mrdump_helper.h"
 #include "mrdump_private.h"
+#include <linux/irq.h>
+#include <linux/irqdesc.h>
 
 #if IS_ENABLED(CONFIG_MTK_TICK_BROADCAST_DEBUG)
 extern void mt_irq_dump_status(unsigned int irq);
@@ -317,6 +319,54 @@ static void kwdt_time_sync(void)
 		(unsigned int)(tv_android.tv_nsec / 1000));
 }
 
+static void show_irq_count(void)
+{
+#define MAX_IRQ_NUM 1024
+	static unsigned int irq_counts[MAX_IRQ_NUM];
+	unsigned int count, unkick_cpu = cpumask_first(cpu_online_mask);
+	unsigned int unkick_cpumask = (get_kick_bit()^get_check_bit())&get_check_bit();
+	struct task_struct *tsk = READ_ONCE(cpu_curr(unkick_cpu));
+	u64 preempt_cnt = READ_ONCE(task_thread_info(tsk)->preempt_count);
+	struct irq_desc *desc;
+	char msg[64];
+	int irq;
+
+	if (unkick_cpumask == (1U << unkick_cpu) &&
+			(preempt_cnt&(NMI_MASK|SOFTIRQ_MASK|HARDIRQ_MASK))) {
+		if (toprgu_base)
+			iowrite32(WDT_RST_RELOAD, toprgu_base + WDT_RST);
+		aee_sram_fiq_log("show irq diff count:\n");
+		for (irq = 0; irq < min_t(int, nr_irqs, MAX_IRQ_NUM); irq++) {
+			desc = irq_to_desc(irq);
+			if (!desc || !desc->kstat_irqs)
+				continue;
+			 /*
+			  * read desc->kstat_irqs maybe encounter data race.
+			  * use data_race bypass iterator_category
+			  */
+			irq_counts[irq] = data_race(*per_cpu_ptr(desc->kstat_irqs, unkick_cpu));
+		}
+		mdelay(2000);
+		for (irq = 0; irq < min_t(int, nr_irqs, MAX_IRQ_NUM); irq++) {
+			desc = irq_to_desc(irq);
+			if (!desc || !desc->kstat_irqs)
+				continue;
+			 /*
+			  * read desc->kstat_irqs maybe encounter data race.
+			  * use data_race bypass iterator_category
+			  */
+			count = data_race(*per_cpu_ptr(desc->kstat_irqs, unkick_cpu));
+			if (count == irq_counts[irq])
+				continue;
+			scnprintf(msg, sizeof(msg), "%3d:%s +%d(%d)\n", irq,
+				desc->action ? desc->action->name : NULL, count - irq_counts[irq],
+				count);
+			aee_sram_fiq_log(msg);
+		}
+		aee_sram_fiq_log("\n");
+	}
+}
+
 static void kwdt_dump_func(void)
 {
 	struct task_struct *g, *t;
@@ -345,6 +395,7 @@ static void kwdt_dump_func(void)
 	if (p_mt_aee_dump_irq_info)
 		p_mt_aee_dump_irq_info();
 #endif
+	show_irq_count();
 	sysrq_sched_debug_show_at_AEE();
 
 	if (toprgu_base)
@@ -731,6 +782,9 @@ static int wdt_pm_notify(struct notifier_block *notify_block,
 		lastresume_syst = cnt;
 		break;
 	}
+
+	if (toprgu_base)
+		iowrite32(WDT_RST_RELOAD, toprgu_base + WDT_RST);
 
 	return 0;
 }

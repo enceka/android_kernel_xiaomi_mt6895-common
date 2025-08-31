@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (c) 2019 MediaTek Inc.
-// Copyright (C) 2022 XiaoMi, Inc.
+
 /*****************************************************************************
  *
  * Filename:
@@ -287,8 +287,8 @@ static void write_shutter(struct subdrv_ctx *ctx, kal_uint32 shutter)
 				//set_dummy();
 		} else {
 			//	write_cmos_sensor(ctx, GROUP_HOLD_ADDR, 0x0100);
-				write_cmos_sensor_8(ctx, 0x0340, ctx->frame_length >> 8);
-				write_cmos_sensor_8(ctx, 0x0341, ctx->frame_length & 0xFF);
+				write_cmos_sensor_8(ctx,0x0340, ctx->frame_length >> 8);
+				write_cmos_sensor_8(ctx,0x0341, ctx->frame_length & 0xFF);
 			//	write_cmos_sensor(ctx, GROUP_HOLD_ADDR, 0x0100);
 		}
 	}
@@ -403,7 +403,8 @@ static void set_shutter_frame_length(struct subdrv_ctx *ctx, kal_uint16 shutter,
 
 	if (shutter & 0xFFFF0000) {
 		Rshift = 6;
-	} else {
+	}
+	else {
 		Rshift = 0;
 	}
 
@@ -540,7 +541,7 @@ static kal_uint32 streaming_control(struct subdrv_ctx *ctx, kal_bool enable)
 			mDELAY(5);
 	} else {
 			//write_cmos_sensor(0x6028,0x4000);
-			write_cmos_sensor_8(ctx, 0x0100, 0x00);
+			write_cmos_sensor_8(ctx, 0x0100, 0x00);	
 
 	}
 	return ERROR_NONE;
@@ -550,7 +551,7 @@ static kal_uint32 streaming_control(struct subdrv_ctx *ctx, kal_bool enable)
 static void sensor_init(struct subdrv_ctx *ctx)
 {
 	S5K4H7_LOG_INF("+\n");
-
+	
 	xagas5k4h7_table_write_cmos_sensor(ctx, xagas5k4h7_init_setting,
 		sizeof(xagas5k4h7_init_setting) / sizeof(kal_uint16));
 
@@ -560,10 +561,10 @@ static void sensor_init(struct subdrv_ctx *ctx)
 static void preview_setting(struct subdrv_ctx *ctx)
 {
 	S5K4H7_LOG_INF("+\n");
-
+	
 	xagas5k4h7_table_write_cmos_sensor(ctx, xagas5k4h7_preview_setting,
 			sizeof(xagas5k4h7_preview_setting) / sizeof(kal_uint16));
-
+	
 	S5K4H7_LOG_INF("-\n");
 } /* preview_setting */
 
@@ -1347,7 +1348,7 @@ static int feature_control(
 				imgsensor_info.sensor_output_dataformat;
 			break;
 		}
-		S5K4H7_LOG_DBG("SENSOR_FEATURE_GET_OUTPUT_FORMAT_BY_SCENARIO get:%d\n", *(feature_data + 1));
+		S5K4H7_LOG_DBG("SENSOR_FEATURE_GET_OUTPUT_FORMAT_BY_SCENARIO get:%d\n",*(feature_data + 1));
 	break;
 	case SENSOR_FEATURE_GET_AWB_REQ_BY_SCENARIO:
 		switch (*feature_data) {
@@ -1789,8 +1790,8 @@ static struct mtk_mbus_frame_desc_entry frame_desc_cust1[] = {
 		.bus.csi2 = {
 			.channel = 0,
 			.data_type = 0x2b,
-			.hsize = 2400,
-			.vsize = 1800,
+			.hsize = 2460,
+			.vsize = 1844,
 		},
 	},
 };

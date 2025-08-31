@@ -175,6 +175,7 @@
 #define MT6375_MSK_RPDET_MANUAL	BIT(6)
 #define MT6375_MSK_RPDET_AUTO	BIT(7)
 /* MT6375_REG_TYPECOTPCTRL: 0xCD */
+#define MT6375_MSK_VREFTS_EN	BIT(7)
 #define MT6375_MSK_TYPECOTP_FWEN	BIT(2)
 /* MT6375_REG_WD12MODECTRL: 0xD0 */
 #define MT6375_MSK_WD12MODE_EN	BIT(4)
@@ -1517,6 +1518,9 @@ static int mt6375_tcpc_init(struct tcpc_device *tcpc, bool sw_reset)
 	/* Disable bleed dischg for IQ about 2mA consumption */
 	mt6375_clr_bits(ddata, TCPC_V10_REG_POWER_CTRL,
 			TCPC_V10_REG_BLEED_DISC_EN);
+
+        /* Enable VREFTS */
+	mt6375_set_bits(ddata, MT6375_REG_TYPECOTPCTRL, MT6375_MSK_VREFTS_EN);
 
 	/* SHIPPING off, AUTOIDLE on */
 	mt6375_set_bits(ddata, MT6375_REG_SYSCTRL1,

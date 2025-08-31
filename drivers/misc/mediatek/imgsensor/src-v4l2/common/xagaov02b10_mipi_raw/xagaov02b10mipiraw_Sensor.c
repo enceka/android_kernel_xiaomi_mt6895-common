@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (c) 2019 MediaTek Inc.
-// Copyright (C) 2022 XiaoMi, Inc.
+
 /*****************************************************************************
  *
  * Filename:
@@ -359,23 +359,28 @@ static kal_uint16 set_gain(struct subdrv_ctx *ctx, kal_uint16 gain)
 			gain = imgsensor_info.max_gain;
 	}
 
-	iReg = 0x10 * gain/BASEGAIN;	//change mtk gain base to sensor gain
+	iReg = 0x10 * gain/BASEGAIN;        //change mtk gain base to sensor gain 
 
-	if (iReg <= 0x10) {	// min Again
-		write_cmos_sensor_8(ctx, 0xfd, 0x01);
-		write_cmos_sensor_8(ctx, 0x22, 0x10);
-		write_cmos_sensor_8(ctx, 0xfe, 0x02);	//fresh
+	if(iReg<=0x10) // min Again
+	{
+		write_cmos_sensor_8(ctx,0xfd, 0x01);
+		write_cmos_sensor_8(ctx,0x22, 0x10);
+		write_cmos_sensor_8(ctx,0xfe, 0x02);	//fresh
 		OV02B10_LOG_DBG("SetGain = 16");
-	} else if (iReg >= 0xf8) {	//max Again
-		write_cmos_sensor_8(ctx, 0xfd, 0x01);
-		write_cmos_sensor_8(ctx, 0x22, 0xf8);
-		write_cmos_sensor_8(ctx, 0xfe, 0x02);	//fresh
+	}
+	else if(iReg>= 0xf8) //max Again
+	{
+		write_cmos_sensor_8(ctx,0xfd, 0x01);
+		write_cmos_sensor_8(ctx,0x22, 0xf8);
+		write_cmos_sensor_8(ctx,0xfe, 0x02);	//fresh
 		OV02B10_LOG_DBG("SetGain = 160");
-	} else {
-		write_cmos_sensor_8(ctx, 0xfd, 0x01);
-		write_cmos_sensor_8(ctx, 0x22, (kal_uint8)iReg);
-		write_cmos_sensor_8(ctx, 0xfe, 0x02);	//fresh
-		OV02B10_LOG_DBG("SetGain = %d", iReg);
+	}
+	else
+	{
+		write_cmos_sensor_8(ctx,0xfd, 0x01);
+		write_cmos_sensor_8(ctx,0x22, (kal_uint8)iReg);
+		write_cmos_sensor_8(ctx,0xfe, 0x02);	//fresh
+		OV02B10_LOG_DBG("SetGain = %d",iReg);
 	}
 
 	return gain;
@@ -438,8 +443,8 @@ static void sensor_init(struct subdrv_ctx *ctx)
 	OV02B10_LOG_INF("+\n");
 
     // Global
-	write_cmos_sensor_8(ctx, 0xfc, 0x01);
-	mdelay(5);
+        write_cmos_sensor_8(ctx, 0xfc, 0x01);
+        mdelay(5);
 	xagaov02b10_table_write_cmos_sensor(ctx, xagaov02b10_init_setting,
 		sizeof(xagaov02b10_init_setting) / sizeof(kal_uint16));
 
@@ -638,7 +643,7 @@ static int open(struct subdrv_ctx *ctx)
 
 	ctx->autoflicker_en = KAL_FALSE;
 	ctx->sensor_mode = IMGSENSOR_MODE_INIT;
-	ctx->shutter = 0x3D0;
+	ctx->shutter = 0x3D0; 
 	ctx->gain = 4 * BASEGAIN;
 	ctx->pclk = imgsensor_info.pre.pclk;
 	ctx->frame_length = imgsensor_info.pre.framelength;
@@ -1424,7 +1429,7 @@ static int feature_control(
 				imgsensor_info.sensor_output_dataformat;
 			break;
 		}
-		OV02B10_LOG_DBG("SENSOR_FEATURE_GET_OUTPUT_FORMAT_BY_SCENARIO get:%d\n", *(feature_data + 1));
+		OV02B10_LOG_DBG("SENSOR_FEATURE_GET_OUTPUT_FORMAT_BY_SCENARIO get:%d\n",*(feature_data + 1));
 	break;
 	case SENSOR_FEATURE_GET_AWB_REQ_BY_SCENARIO:
 		switch (*feature_data) {

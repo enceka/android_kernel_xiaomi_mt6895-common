@@ -177,7 +177,7 @@ struct tfa98xx {
 
 
 /*for furture, we will move it to DTS to mark left and right channel*/
-#if defined(CONFIG_TARGET_PRODUCT_XAGA)
+#if defined(CONFIG_TARGET_PRODUCT_PEARL) || defined(CONFIG_TARGET_PRODUCT_XAGA)
 #define TFA_LEFT_DEVICE_ADDRESS   (0x34)
 #define TFA_RIGHT_DEVICE_ADDRESS  (0x35)
 #else

@@ -59,6 +59,7 @@ enum adapter_event {
 	MTK_TYPEC_WD_STATUS,
 	MTK_TYPEC_HRESET_STATUS,
 	MTK_PD_UVDM,
+	MTK_PD_CONNECT_SOFT_RESET,
 };
 
 enum adapter_property {

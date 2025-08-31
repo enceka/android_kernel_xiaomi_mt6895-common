@@ -38,14 +38,26 @@
 
 #define MIN_JEITA_CHG_INDEX	1
 #define MAX_JEITA_CHG_INDEX	4
+#if  defined (CONFIG_TARGET_PRODUCT_YUECHU)
+#define MIN_THERMAL_LIMIT_FCC	1500
+#else
 #define MIN_THERMAL_LIMIT_FCC	2500
+#endif
 #define MIN_THERMAL_LIMIT_FCC_BYPASS	1600
+#define BQ_TAPER_HYS_MV             10
+#define BQ_TAPER_GT_CV_TIMES                3
+
+/* define daumier macro */
+#define MIN_THERMAL_LIMIT_FCC_DAUMIER 500
+#define MIN_2_1_CHARGE_CURRENT  1000
+#define MIN_4_1_CHARGE_CURRENT  2000
 
 #define MAX_WATT_33W		34000000
 #define MAX_WATT_67W		67000000
 #define MAX_VBUS_67W		12000
 #define MAX_IBUS_67W		6200
 #define MIN_IBUS_67W		2200
+#define MIN_IBUS_67W_DAUMIER		2000
 #define SECOND_IBUS_67W		6100
 #define PD2_VBUS		    9000
 
@@ -90,7 +102,6 @@
 #define TAPER_IBUS_THR			450
 
 /* BQ taper related */
-#define BQ_TAPER_HYS_MV			10
 #define BQ_TAPER_DECREASE_STEP_MA	100
 #define HIGH_VBAT_MV			8700
 #define CRITICAL_HIGH_VBAT_MV		8900

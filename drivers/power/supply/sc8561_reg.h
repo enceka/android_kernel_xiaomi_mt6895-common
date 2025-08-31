@@ -625,5 +625,7 @@
 #define SC8561_ACDRV_UP_ENABLE               1
 #define SC8561_ACDRV_UP_DISABLE              0
 
+#define SC8561_ENABLE_BYPASS_BIT            0x02
+
 #endif
 

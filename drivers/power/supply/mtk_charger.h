@@ -12,6 +12,7 @@
 #include "pmic_voter.h"
 #include "mtk_charger_algorithm_class.h"
 #include <linux/power_supply.h>
+#include <linux/types.h>
 #include "mtk_smartcharging.h"
 #include "step_jeita_charge.h"
 
@@ -175,7 +176,22 @@ enum product_name{
 	MATISSE,
 	RUBENS,
 	XAGA,
-	XAGAPRO
+	XAGAPRO,
+	DAUMIER
+};
+
+enum {
+	CHG_STAT_SLEEP,
+	CHG_STAT_VBUS_RDY,
+	CHG_STAT_TRICKLE,
+	CHG_STAT_PRE,
+	CHG_STAT_FAST,
+	CHG_STAT_EOC,
+	CHG_STAT_BKGND,
+	CHG_STAT_DONE,
+	CHG_STAT_FAULT,
+	CHG_STAT_OTG = 15,
+	CHG_STAT_MAX,
 };
 
 /* sw jeita */
@@ -371,15 +387,14 @@ struct mtk_charger {
 	int entry_soc;
 	int flag;
 	int cycle_count;
-	int disable_te_count;
 	int switch_pd_wa;
 
 	int thermal_level;
-	int last_thermal_level;
 	int thermal_limit[THERMAL_LIMIT_TUPLE][THERMAL_LIMIT_COUNT];
 	int thermal_current;
 	int pd_type;
 	bool pd_reset;
+	bool pd_soft_reset;
 
 	u32 bootmode;
 	u32 boottype;
@@ -404,12 +419,14 @@ struct mtk_charger {
 	bool otg_enable;
 	bool pd_verify_done;
 	bool pd_verifed;
+        bool warm_term;
 	int apdo_max;
 	int cc_orientation;
 	int typec_mode;
 	int fake_typec_temp;
 	int fv;
 	int fv_ffc;
+	int fv_ffc_large_cycle;
 	int iterm;
 	int iterm_warm;
 	int iterm_ffc;
@@ -493,6 +510,10 @@ struct mtk_charger {
 	struct notifier_block chg_alg_nb;
 	bool enable_hv_charging;
 
+	/* main connector detection */
+	struct iio_channel *mt6373_adc3;
+	bool mt6373_adc3_enable;
+
 	/* water detection */
 	bool water_detected;
 
@@ -525,11 +546,16 @@ struct mtk_charger {
 	bool night_charge_enable;
 	bool sic_support;
 	bool suspend_recovery;
+	bool thermal_remove;
 	int diff_fv_val;
+	int ov_check_only_once;
 	int max_fcc;
 	int product_name;
 	int bms_i2c_error_count;
 	int gauge_authentic;
+	int battcont_online_adc;
+	int pmic_comp_v;
+	atomic_t ieoc_wkrd;
 };
 
 enum power_supply_typec_mode {
@@ -594,6 +620,9 @@ enum usb_property {
 	USB_PROP_PMIC_IBAT,
 	USB_PROP_PMIC_VBUS,
 	USB_PROP_INPUT_CURRENT_NOW,
+	USB_PROP_BATTCONT_ONLINE,
+	USB_PROP_THERMAL_REMOVE,
+	USB_PROP_WARM_TERM,
 };
 
 struct mtk_usb_sysfs_field_info {
@@ -664,10 +693,15 @@ extern int charger_manager_get_sic_current(void);
 extern void charger_manager_set_sic_current(int sic_current);
 extern void night_charging_set_flag(bool night_charging);
 extern int night_charging_get_flag(void);
+extern void set_soft_reset_status(int val);
+extern int get_soft_reset_status(void);
+
 extern int input_suspend_set_flag(int val);
 extern int input_suspend_get_flag(void);
 extern void update_quick_chg_type(struct mtk_charger *info);
 extern void smart_batt_set_diff_fv(int val);
+extern void update_connect_temp(struct mtk_charger *info);
+
 
 /* functions for other */
 extern int mtk_chg_enable_vbus_ovp(bool enable);

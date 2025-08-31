@@ -22,6 +22,7 @@
 #include <linux/of_gpio.h>
 #include <linux/regulator/consumer.h>
 #include <linux/power_supply.h>
+#include <linux/iio/consumer.h>
 #include "mtk_charger.h"
 #include "adapter_class.h"
 #include "bq28z610.h"
@@ -29,6 +30,8 @@
 static void get_index(struct step_jeita_cfg0 *cfg, int fallback_hyst, int forward_hyst, int value, int *index, bool ignore_hyst)
 {
 	int new_index = 0, i = 0;
+
+	chr_err("%s: value = %d, index[0] = %d, index[1] = %d\n", __func__, value, index[0], index[1]);
 
 	if (value < cfg[0].low_threshold) {
 		index[0] = index[1] = 0;
@@ -58,6 +61,7 @@ static void get_index(struct step_jeita_cfg0 *cfg, int fallback_hyst, int forwar
 		index[1] = index[0];
 		index[0] = new_index;
 	}
+
 	return;
 }
 
@@ -97,6 +101,8 @@ static void monitor_jeita_descent(struct mtk_charger *info)
 			vote(info->fcc_votable, JEITA_CHARGE_VOTER, true, info->jeita_chg_fcc);
 		else
 			vote(info->fcc_votable, JEITA_CHARGE_VOTER, true, current_fcc + JEITA_FCC_DESCENT_STEP);
+	chr_err("current_fcc:%d,%d,%d,%d",current_fcc,
+	current_fcc - JEITA_FCC_DESCENT_STEP, info->jeita_chg_fcc, current_fcc + JEITA_FCC_DESCENT_STEP);
 	}
 }
 
@@ -105,7 +111,6 @@ static int typec_connect_ntc_set_vbus(struct mtk_charger *info, bool is_on)
 	struct regulator *vbus = info->vbus_contral;
 	int ret = 0, vbus_vol = 3300000;
 
-	/* vbus is optional */
 	if (!vbus)
 		return 0;
 
@@ -163,6 +168,7 @@ static void monitor_usb_otg_burn(struct work_struct *work)
 		otg_monitor_delay_time = 2000;
 	else if(type_temp > 550)
 		otg_monitor_delay_time = 1000;
+	chr_err("%s:get typec temp =%d otg_monitor_delay_time = %d\n", __func__, type_temp, otg_monitor_delay_time);
 	if(type_temp >= TYPEC_BURN_TEMP && !info->typec_otg_burn)
 	{
 		info->typec_otg_burn = true;
@@ -183,22 +189,13 @@ static void monitor_usb_otg_burn(struct work_struct *work)
 static void monitor_typec_burn(struct mtk_charger *info)
 {
 	int type_temp = 0, retry_count = 2;
-	bool cp_master_enable = false, cp_slave_enable = false;
-
+	bool cp_master_enable = false;
 	usb_get_property(USB_PROP_CONNECTOR_TEMP, &type_temp);
-
+	chr_err("%s get typec temp=%d otg_enable=%d\n", __func__, type_temp, info->otg_enable);
+        if (type_temp > TYPEC_BURN_TEMP - TYPEC_BURN_HYST)
+                update_connect_temp(info);
 	if (type_temp >= TYPEC_BURN_TEMP && !info->typec_burn_status && !info->otg_enable) {
 		info->typec_burn = true;
-		while (retry_count) {
-			if (info->cp_master && info->cp_slave) {
-				charger_dev_is_enabled(info->cp_master, &cp_master_enable);
-				charger_dev_is_enabled(info->cp_slave, &cp_slave_enable);
-			}
-			if (!cp_master_enable && !cp_slave_enable)
-				break;
-			msleep(80);
-			retry_count--;
-		}
 		adapter_dev_set_cap_xm(info->pd_adapter, MTK_PD_APDO, 5000, 1000);
           	msleep(200);
 		if (info->real_type == XMUSB350_TYPE_HVCHG)
@@ -239,7 +236,24 @@ static void handle_jeita_charge(struct mtk_charger *info)
 
 	get_index(info->jeita_fv_cfg, info->jeita_fallback_hyst, info->jeita_forward_hyst, info->temp_now, info->jeita_chg_index, false);
 
-	vote(info->fv_votable, JEITA_CHARGE_VOTER, true, info->jeita_fv_cfg[info->jeita_chg_index[0]].value  - info->diff_fv_val);
+  	if (is_between(info->jeita_fcc_cfg[0].low_threshold, info->jeita_fcc_cfg[STEP_JEITA_TUPLE_COUNT - 1].high_threshold, info->temp_now)
+            && !info->typec_burn && !info->charge_full){
+        	if(info->jeita_fv_cfg[info->jeita_chg_index[0]].value == 4100 && info->vbat_now > 4100){
+                        charger_dev_enable(info->chg1_dev, false);
+                } else {
+                  	if(!info->night_charging)
+                        	charger_dev_enable(info->chg1_dev, true);
+			if(info->cycle_count > 100)
+                        	vote(info->fv_votable, JEITA_CHARGE_VOTER, true, info->jeita_fv_cfg[info->jeita_chg_index[0]].value -20 - info->diff_fv_val + info->pmic_comp_v);
+			else
+				vote(info->fv_votable, JEITA_CHARGE_VOTER, true, info->jeita_fv_cfg[info->jeita_chg_index[0]].value - info->diff_fv_val + info->pmic_comp_v);
+                  }
+        } else {
+                  if(info->cycle_count > 100)
+                    vote(info->fv_votable, JEITA_CHARGE_VOTER, true, info->jeita_fv_cfg[info->jeita_chg_index[0]].value -20 - info->diff_fv_val + info->pmic_comp_v);
+                  else
+                    vote(info->fv_votable, JEITA_CHARGE_VOTER, true, info->jeita_fv_cfg[info->jeita_chg_index[0]].value - info->diff_fv_val + info->pmic_comp_v);
+          }
 
 	if (jeita_vbat_low) {
 		if (info->vbat_now < (info->jeita_fcc_cfg[info->jeita_chg_index[0]].extra_threshold + diff_curr_val)) {
@@ -262,12 +276,8 @@ static void handle_jeita_charge(struct mtk_charger *info)
 
 	if(info->bms_i2c_error_count >= 10)
 	{
-		if((info->product_name == XAGA) || (info->product_name == XAGAPRO)){
-			vote_override(info->fcc_votable, FG_I2C_VOTER, true, 500);
-			vote_override(info->icl_votable, FG_I2C_VOTER, true, 500);
-		}else{
-			charger_dev_enable(info->chg1_dev, false);
-		}
+		vote_override(info->fcc_votable, FG_I2C_VOTER, true, 500);
+		vote_override(info->icl_votable, FG_I2C_VOTER, true, 500);
 	}
 	return;
 }
@@ -334,22 +344,6 @@ static void monitor_thermal_limit(struct mtk_charger *info)
 	default:
 		chr_err("not support psy_type to check charger parameters");
 	}
-	if (info->last_thermal_level == 15 && thermal_level < 15) {
-		chr_err("[CHARGE_LOOP] disable TE\n");
-		charger_dev_enable_termination(info->chg1_dev, false);
-		info->disable_te_count = 0;
-	}
-	if(abs(info->current_now) <= (iterm_effective + 150))
-		info->disable_te_count ++;
-	else
-		info->disable_te_count = 0;
-	chr_err("[CHARGE_LOOP] disable_te_count = %d\n", info->disable_te_count);
-	if(info->disable_te_count == 5)
-	{
-		chr_err("[CHARGE_LOOP] enable TE\n");
-		charger_dev_enable_termination(info->chg1_dev, true);
-	}
-	info->last_thermal_level = thermal_level;
 }
 static int handle_ffc_charge(struct mtk_charger *info)
 {
@@ -364,8 +358,11 @@ static int handle_ffc_charge(struct mtk_charger *info)
 		chr_err("get ti_gauge bms failed\n");
 		return 0;
 	}
+    if(info->soc <= info->ffc_high_soc){
+		info->recharge = false;
+	}
 	if ((!info->recharge && info->entry_soc <= info->ffc_high_soc && is_between(info->ffc_low_tbat, info->ffc_high_tbat, info->temp_now) &&
-			(info->pd_type == MTK_PD_CONNECT_PE_READY_SNK_APDO && info->pd_adapter->verifed) && (info->thermal_level <= 14)) || info->suspend_recovery)
+			(info->pd_type == MTK_PD_CONNECT_PE_READY_SNK_APDO && info->pd_adapter->verifed) && (info->thermal_level <= ENABLE_FCC_ITERM_LEVEL)) || info->suspend_recovery)
 		info->ffc_enable = true;
 	else
 		info->ffc_enable = false;
@@ -376,9 +373,9 @@ static int handle_ffc_charge(struct mtk_charger *info)
 		iterm = info->iterm;
 
 	if (is_between(info->ffc_medium_tbat, info->ffc_high_tbat, info->temp_now))
-		iterm_ffc = min(info->iterm_ffc_warm, 800);
+		iterm_ffc = min(info->iterm_ffc_warm, ITERM_FCC_WARM);
 	else
-		iterm_ffc = min(info->iterm_ffc, 800);
+		iterm_ffc = min(info->iterm_ffc, ITERM_FCC_WARM);
 
 	if (!info->gauge_authentic)
 		vote(info->fcc_votable, FFC_VOTER, true, 2000);
@@ -387,22 +384,22 @@ static int handle_ffc_charge(struct mtk_charger *info)
 
 	bms_get_property(BMS_PROP_CAPACITY_RAW, &raw_soc);
 	if (info->ffc_enable) {
-		vote(info->fv_votable, FFC_VOTER, true, info->fv_ffc - info->diff_fv_val);
+		vote(info->fv_votable, FFC_VOTER, true, ((info->cycle_count > 100) ? info->fv_ffc_large_cycle : info->fv_ffc) - info->diff_fv_val + info->pmic_comp_v);
 		vote(info->iterm_votable, FFC_VOTER, true, iterm_ffc - 100);
 		val = true;
 		bms_set_property(BMS_PROP_FASTCHARGE_MODE, val);
 		val = FG_MONITOR_DELAY_5S;
 		bms_set_property(BMS_PROP_MONITOR_DELAY, val);
 	} else if (info->pd_type == MTK_PD_CONNECT_PE_READY_SNK_APDO) {
-		vote(info->fv_votable, FFC_VOTER, true, info->fv  - info->diff_fv_val);
-		vote(info->iterm_votable, FFC_VOTER, true, iterm - 50);
+		vote(info->fv_votable, FFC_VOTER, true, ((info->cycle_count > 100) ? (info->fv - 20) : info->fv) - info->diff_fv_val + info->pmic_comp_v);
+		vote(info->iterm_votable, FFC_VOTER, true, iterm);
 		val = false;
 		bms_set_property(BMS_PROP_FASTCHARGE_MODE, val);
 		val = FG_MONITOR_DELAY_5S;
 		bms_set_property(BMS_PROP_MONITOR_DELAY, val);
 	} else {
-		vote(info->fv_votable, FFC_VOTER, true, info->fv  - info->diff_fv_val);
-		vote(info->iterm_votable, FFC_VOTER, true, iterm - 50);
+		vote(info->fv_votable, FFC_VOTER, true, ((info->cycle_count > 100) ? (info->fv - 20) : info->fv) - info->diff_fv_val + info->pmic_comp_v);
+		vote(info->iterm_votable, FFC_VOTER, true, iterm);
 		val = false;
 		bms_set_property(BMS_PROP_FASTCHARGE_MODE, val);
 		val = FG_MONITOR_DELAY_30S;
@@ -414,10 +411,11 @@ static int handle_ffc_charge(struct mtk_charger *info)
 
 static void check_full_recharge(struct mtk_charger *info)
 {
-	static int full_count = 0, recharge_count = 0, iterm = 0, threshold_mv = 0, real_full = 0;
+	static int full_count = 0, recharge_count = 0, iterm = 0, threshold_mv = 0, real_full = 0, eoc_stat_count = 0;
 	int iterm_effective = get_effective_result(info->iterm_votable);
-	int fv_effective = get_effective_result(info->fv_votable);
-	int rsoc = 0;
+	int fv_effective = get_effective_result(info->fv_votable) - info->pmic_comp_v;
+	int raw_soc = 0, ret;
+	u32 stat;
 
 	if (info->ffc_enable) {
 		if (is_between(info->ffc_medium_tbat, info->ffc_high_tbat, info->temp_now))
@@ -438,15 +436,19 @@ static void check_full_recharge(struct mtk_charger *info)
 		else
 			recharge_count = 0;
 
-		bms_get_property(BMS_PROP_RSOC, &rsoc);
+		bms_get_property(BMS_PROP_CAPACITY_RAW, &raw_soc);
 
-		if (((recharge_count >= 15) || (rsoc < 98)) && (info->temp_now < 460)) {
+		if (((recharge_count >= 15) || (raw_soc < 9800)) && (info->temp_now < 460)) {
 			info->charge_full = false;
-			if(real_full)
+                        info->warm_term = false;
+			chr_err("start recharge\n");
+			if(real_full){
 				info->recharge = true;
+			}
 			recharge_count = 0;
 			if(info->bms_i2c_error_count < 10)
 				charger_dev_enable(info->chg1_dev, true);
+            		adapter_dev_set_cap_xm(info->pd_adapter, MTK_PD_APDO, 5000, 3000);
 			power_supply_changed(info->psy1);
 		}
 	} else {
@@ -455,8 +457,10 @@ static void check_full_recharge(struct mtk_charger *info)
 			threshold_mv = 50;
 		else
 			threshold_mv = 100;
-		if ((info->soc == 100 && (info->vbat_now >= fv_effective - threshold_mv) && (((-info->current_now <= iterm) && info->fg_full) || ((-info->current_now <= iterm_effective + 100) && info->bbc_charge_done)))
-                    || ((info->vbat_now >= fv_effective - 30) && (-info->current_now <= iterm) && (info->temp_now >= 481)))
+
+	if ((info->soc == 100 && (info->vbat_now >= fv_effective - threshold_mv) && (-info->current_now <= iterm) && info->fg_full)
+             || (info->soc == 100 && (info->vbat_now >= fv_effective - threshold_mv) && (-info->current_now <= iterm_effective + 100) && info->bbc_charge_done))
+
 			full_count++;
 		else
 			full_count = 0;
@@ -464,8 +468,15 @@ static void check_full_recharge(struct mtk_charger *info)
 		if (full_count >= 6) {
 			full_count = 0;
 			info->charge_full = true;
-			if(info->temp_now < 481){
+                        info->warm_term = true;
+			chr_err("report charge_full\n");
+                        adapter_dev_set_cap_xm(info->pd_adapter, MTK_PD_APDO, 5000, 1000);
+                        msleep(200);
+		        if (info->real_type == XMUSB350_TYPE_HVCHG)
+			        charger_set_dpdm_voltage(info, 0, 0);
+                        if(info->temp_now < WARM_TEMP){
 				real_full = 1;
+                                info->warm_term = false;
 				charger_dev_do_event(info->chg1_dev, EVENT_FULL, 0);
 				power_supply_changed(info->psy1);
 			}
@@ -473,12 +484,50 @@ static void check_full_recharge(struct mtk_charger *info)
 			charger_dev_enable(info->chg1_dev, false);
 		}
 
-		if ((info->bbc_charge_done && info->temp_now < 475 && info->temp_now >0) && (info->soc < 100 || (info->soc == 100 && info->bbc_charge_enable && (info->vbat_now < fv_effective - threshold_mv) && !info->charge_full))) {
+		if ((info->bbc_charge_done && info->temp_now <= 460 && info->temp_now >0) && (info->soc < 100 || (info->soc == 100 && info->bbc_charge_enable && (info->vbat_now < fv_effective - threshold_mv) && !info->charge_full))) {
 			charger_dev_enable_powerpath(info->chg1_dev, false);
 			charger_dev_enable(info->chg1_dev, false);
 			msleep(500);
 			charger_dev_enable_powerpath(info->chg1_dev, true);
 			charger_dev_enable(info->chg1_dev, true);
+		}
+
+		ret = charger_dev_get_charge_ic_stat(info->chg1_dev, &stat);
+		if(ret<0)
+			chr_err("read F_IC_STAT failed\n");
+		else
+			chr_err("read F_IC_STAT success stat=%d\n", stat);
+		if(stat == CHG_STAT_EOC)
+			eoc_stat_count++;
+		else
+			eoc_stat_count = 0;
+		chr_err("eoc_stat_count=%d\n", eoc_stat_count);
+		if(eoc_stat_count >= 15 && !atomic_read(&info->ieoc_wkrd))
+		{
+			eoc_stat_count = 0;
+			if(info->vbat_now <= (fv_effective-40))
+					info->pmic_comp_v = 30;
+            else if(info->vbat_now <= (fv_effective-30))
+					info->pmic_comp_v = 20;
+			else if(info->vbat_now <= (fv_effective-20))
+					info->pmic_comp_v = 10;
+			else
+					info->pmic_comp_v = 0;
+			
+			vote(info->fv_votable, JEITA_CHARGE_VOTER, true, fv_effective + info->pmic_comp_v);
+			vote(info->fv_votable, FFC_VOTER, true, fv_effective + info->pmic_comp_v);
+			msleep(10);
+			ret = charger_dev_reset_eoc_state(info->chg1_dev);
+			if(ret < 0)
+				chr_err("failed to reset eoc stat\n");
+			charger_dev_enable_termination(info->chg1_dev, true);
+			atomic_set(&info->ieoc_wkrd, 1);
+			chr_err("enter compensate cv=%d, vbat=%d, comp_cv=%d\n", fv_effective, info->vbat_now, info->pmic_comp_v);
+		}
+		else if(info->vbat_now > fv_effective && atomic_read(&info->ieoc_wkrd))
+		{
+			info->pmic_comp_v = 0;
+			chr_err("cancle compensate fv_effective=%d\n", fv_effective);
 		}
 	}
 }
@@ -487,6 +536,7 @@ static void check_charge_data(struct mtk_charger *info)
 {
 	union power_supply_propval pval = {0,};
 	int ret = 0, val = 0;
+        static int pre_tbat = 0;
 
 	if (!info->bms_psy) {
 		info->bms_psy = power_supply_get_by_name("bms");
@@ -499,7 +549,6 @@ static void check_charge_data(struct mtk_charger *info)
 		chr_err("failed to get battery_psy\n");
 		return;
 	}
-
 	if (!info->cp_master || !info->cp_slave) {
 		info->cp_master = get_charger_by_name("cp_master");
 		info->cp_slave = get_charger_by_name("cp_slave");
@@ -535,10 +584,14 @@ static void check_charge_data(struct mtk_charger *info)
 		info->temp_now = pval.intval;
 
 	ret = power_supply_get_property(info->battery_psy, POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT, &pval);
-	if (ret)
+	if (ret) {
 		chr_err("failed to get thermal level\n");
-	else
-		info->thermal_level = pval.intval;
+	} else {
+		if (info->thermal_remove)
+			info->thermal_level = 0;
+		else
+			info->thermal_level = pval.intval;
+	}
 
 	ret = bms_get_property(BMS_PROP_I2C_ERROR_COUNT, &val);
 	if (ret)
@@ -552,8 +605,6 @@ static void check_charge_data(struct mtk_charger *info)
 	else
 		info->gauge_authentic = val;
 
-	if (info->input_suspend || info->typec_burn)
-		chr_err("[CHARGE_LOOP] input_suspend = %d, typec_burn = %d\n", info->input_suspend, info->typec_burn);
 }
 
 static void monitor_night_charging(struct mtk_charger *info)
@@ -569,6 +620,31 @@ static void monitor_night_charging(struct mtk_charger *info)
 	{
 		info->night_charge_enable = false;
 		charger_dev_enable(info->chg1_dev, true);
+	}
+}
+
+static void monitor_main_connector(struct mtk_charger *info)
+{
+	int val;
+	int ret;
+	if(info->mt6373_adc3 == NULL)
+		return;
+	ret = iio_read_channel_processed(info->mt6373_adc3, &val);
+	if(ret < 0)
+	{
+		return;
+	}
+	usb_set_property(USB_PROP_BATTCONT_ONLINE, val);
+	chr_err("%s val =%d\n",__func__, val);
+	if(val >= 1400 && !info->mt6373_adc3_enable)
+	{
+		vote(info->fcc_votable, MAIN_CON_ERR_VOTER, true, 2000);
+		info->mt6373_adc3_enable = true;
+	}
+	else if(val < 1400 && info->mt6373_adc3_enable)
+	{
+		vote(info->fcc_votable, MAIN_CON_ERR_VOTER, false, 0);
+		info->mt6373_adc3_enable = false;
 	}
 }
 
@@ -596,6 +672,8 @@ static void charge_monitor_func(struct work_struct *work)
 
 	monitor_typec_burn(info);
 
+	monitor_main_connector(info);
+
 	schedule_delayed_work(&info->charge_monitor_work, msecs_to_jiffies(FCC_DESCENT_DELAY));
 }
 
@@ -608,7 +686,7 @@ static int parse_step_charge_config(struct mtk_charger *info, bool farce_update)
 	union power_supply_propval pval = {0,};
 	static bool low_cycle = true;
 	bool update = false;
-	int total_length = 0, ret = 0;
+	int total_length = 0, i = 0, ret = 0;
 
 	if (!info->bms_psy)
 		info->bms_psy = power_supply_get_by_name("bms");
@@ -664,6 +742,7 @@ static int parse_step_charge_config(struct mtk_charger *info, bool farce_update)
 				return ret;
 			}
 		}
+
 	}
 
 	return ret;
@@ -681,8 +760,6 @@ void reset_step_jeita_charge(struct mtk_charger *info)
 	else
 		info->jeita_chg_fcc = info->jeita_fcc_cfg[info->jeita_chg_index[0]].high_value;
 	vote(info->fcc_votable, JEITA_CHARGE_VOTER, true, info->jeita_chg_fcc);
-	chr_err(" fcc:%d,low_value:%d,high_value:%d",info->jeita_chg_fcc,
-	info->jeita_fcc_cfg[info->jeita_chg_index[0]].low_value, info->jeita_fcc_cfg[info->jeita_chg_index[0]].high_value);
 
 	parse_step_charge_config(info, false);
 }
@@ -916,28 +993,20 @@ int step_jeita_init(struct mtk_charger *info, struct device *dev)
 	info->vbus_contral = devm_regulator_get(dev, "vbus_control");
 	if (IS_ERR(info->vbus_contral))
 		chr_err("failed to get vbus contral\n");
-	info->product_name = MATISSE;
 	info->mt6368_moscon1_control = of_property_read_bool(np, "mt6368_moscon1_control");
-	if (info->mt6368_moscon1_control)
-	{
-		info->product_name = RUBENS;
-		chr_err("successed to parse mt6368_moscon1_control\n");
-	}
-	product_name = of_property_read_bool(np, "xaga_product");
-	if (product_name)
-	{
-		info->product_name = XAGA;
-		chr_err("successed to parse xaga_product\n");
-	}
-	product_name = of_property_read_bool(np, "xagapro_product");
-	if (product_name)
-	{
-		info->product_name = XAGAPRO;
-		chr_err("successed to parse xagapro_product\n");
-	}
+
 	info->sic_support =  of_property_read_bool(np, "sic_support");
 	if (!info->sic_support)
 		chr_err("failed to parse sic_support\n");
+	info->mt6373_adc3 = devm_iio_channel_get(dev, "mt6373_adc3"); 
+	ret = IS_ERR(info->mt6373_adc3);
+	if(ret) {
+       info->mt6373_adc3 = NULL;
+	   pr_err("failed get iio_channel, ret = %d\n", ret);
+	}
+	else
+		pr_err("success get iio_channel, ret = %d\n", ret);
+
 	INIT_DELAYED_WORK(&info->charge_monitor_work, charge_monitor_func);
 	INIT_DELAYED_WORK(&info->usb_otg_monitor_work, monitor_usb_otg_burn);
 

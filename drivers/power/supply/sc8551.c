@@ -125,7 +125,12 @@ static struct regmap_config sc8551_regmap_config = {
 };
 
 static int log_level = 1;
+
+
 static int fake_work_mode = SC8551_SLAVE;
+
+
+
 
 #define sc_err(fmt, ...)					\
 do {								\
@@ -196,8 +201,6 @@ static int sc8551_enable_bypass(struct sc8551 *chip, int enable)
 
 	ret = regmap_update_bits(chip->regmap, SC8551_BYPASS_REG, SC8551_ENABLE_BYPASS_BIT, enable ? SC8551_ENABLE_BYPASS_BIT : 0);
 
-	/* in bypass mode, ovp will be set to half value automatically */
-	/* in charge_pump mode, should set it manually */
 	if (!enable) {
 		ret = sc8551_set_bus_ovp(chip,chip->bus_ovp);
 		ret = sc8551_set_ac_ovp(chip, chip->ac_ovp);
@@ -410,10 +413,7 @@ static int ops_sc8561_mode_init(struct charger_device *chg_dev, int value)
 {
 	struct sc8551 *chip = charger_get_data(chg_dev);
 	int ret = 0;
-	// if(value == CP_FORWARD_1_TO_1)
-	// {
-	// 	ret = sc8551_enable_bypass(chip, enable);
-	// }
+
 	sc_err("%s ops mode init value = %d\n", chip->log_tag, value);
 
 	return ret;
@@ -472,6 +472,17 @@ static int ops_sc8551_get_bypass_support(struct charger_device *chg_dev, bool *e
 		return 0;
 }
 
+static int ops_sc8551_enable_adc(struct charger_device *chg_dev, bool enable)
+{
+	struct sc8551 *chip = charger_get_data(chg_dev);
+	int ret = 0;
+	ret = sc8551_enable_adc(chip, enable);
+	if (ret)
+		sc_err("%s ops failed to enable adc\n", chip->log_tag);
+        sc_err("%s ops_sc8551_enable_adc: %d \n", chip->log_tag, enable);
+	return ret;
+}
+
 static const struct charger_ops sc8551_chg_ops = {
 	.enable = ops_sc8551_enable_charge,
 	.is_enabled = ops_sc8551_get_charge_enable,
@@ -482,6 +493,7 @@ static const struct charger_ops sc8551_chg_ops = {
 	.is_bypass_enabled = ops_sc8551_is_bypass_enabled,
 	.cp_device_init = ops_sc8561_mode_init,
 	.cp_get_bypass_support = ops_sc8551_get_bypass_support,
+	.cp_enable_adc = ops_sc8551_enable_adc,
 };
 
 static const struct charger_properties sc8551_standalone_chg_props = {
@@ -621,7 +633,7 @@ static ssize_t cp_sysfs_show(struct device *dev,
 	return count;
 }
 
-/* Must be in the same order as BMS_PROP_* */
+
 static struct mtk_cp_sysfs_field_info cp_sysfs_field_tbl[] = {
 	CP_SYSFS_FIELD_RO(cp_vbus, CP_PROP_VBUS),
 	CP_SYSFS_FIELD_RO(cp_ibus, CP_PROP_IBUS),
@@ -817,24 +829,13 @@ static const struct attribute_group sc8551_attr_group = {
 
 static void sc8551_irq_handler(struct work_struct *work)
 {
-	//struct sc8551 *chip = container_of(work, struct sc8551, irq_handle_work.work);
 
-	//__pm_relax(&chip->irq_handle_wakelock);
 
 	return;
 }
 
 static irqreturn_t sc8551_interrupt(int irq, void *private)
 {
-	//struct sc8551 *chip = private;
-
-	//sc_info("%s sc8551_interrupt\n", chip->log_tag);
-
-	//if (chip->irq_handle_wakelock.active)
-	//	return IRQ_HANDLED;
-	//else
-	//	__pm_stay_awake(&chip->irq_handle_wakelock);
-	//schedule_delayed_work(&chip->irq_handle_work, 0);
 
 	return IRQ_HANDLED;
 }
@@ -894,8 +895,6 @@ static int sc8551_parse_dt(struct sc8551 *chip)
 	if (ret)
 		sc_err("%s failed to parse bat_ocp\n", chip->log_tag);
 
-	sc_info("%s parse config, [ac_ovp bus_ovp bus_ocp bat_ovp bat_ocp] = [%d %d %d %d %d]\n", chip->log_tag,
-		chip->ac_ovp, chip->bus_ovp, chip->bus_ocp, chip->bat_ovp, chip->bat_ocp);
 
 	chip->irq_gpio = of_get_named_gpio(np, "sc8551_irq_gpio", 0);
 	if (!gpio_is_valid(chip->irq_gpio)) {
@@ -953,7 +952,7 @@ static int sc8551_init_adc(struct sc8551 *chip)
 	ret = regmap_update_bits(chip->regmap, SC8551_ADC_FN_DISABLE_REG, SC8551_DISABLE_IBAT_ADC_BIT, SC8551_DISABLE_IBAT_ADC_BIT);
 	ret = regmap_update_bits(chip->regmap, SC8551_ADC_FN_DISABLE_REG, SC8551_DISABLE_TDIE_ADC_BIT, 0);
 
-	ret = sc8551_enable_adc(chip, true);
+	ret = sc8551_enable_adc(chip, false);
 
 	return ret;
 }
@@ -1006,33 +1005,51 @@ static int sc8551_init_device(struct sc8551 *chip)
 	return ret;
 }
 
+static int try_to_find_i2c_regess(struct i2c_client *client)
+{
+	uint8_t reg_set[] = {0x65, 0x66};
+	uint8_t ori_reg = client->addr;
+	int i, ret = 0;
+        sc_err("try_to_find_i2c_regess.\n");
+	for (i = 0; i < 2; i++) {
+		client->addr = reg_set[i];
+		//info->regmap = devm_regmap_init_i2c(info->client, &SC8551_PART_INFO_REG);
+		ret = i2c_smbus_read_byte_data(client, SC8551_PART_INFO_REG);
+		if (!IS_ERR_VALUE((unsigned long)ret)) {
+			sc_info("find to can be access regess(0x%02x)(ori=0x%02x).\n",
+					client->addr, ori_reg);
+			return 1;
+		} else {
+			sc_err("can't access regess(0x%02x)(ori=0x%02x).\n",
+					client->addr, ori_reg);
+		}
+	}
+
+	client->addr = ori_reg;
+	sc_err("retry (0x%02x).\n", client->addr);
+	ret = i2c_smbus_read_byte_data(client, SC8551_PART_INFO_REG);
+	if (!IS_ERR_VALUE((unsigned long)ret)) {
+		sc_err("retry (0x%02x) can be access regess.\n", client->addr);
+
+		return 1;
+	}
+
+	return 0;
+}
+
 static int sc8551_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
 	struct device *dev = &client->dev;
 	struct sc8551 *chip;
 	int ret = 0;
-#if defined(CONFIG_TARGET_PRODUCT_XAGA)
-	const char * buf = get_hw_sku();
-	char *xaga = NULL;
-	char *xagapro = strnstr(buf, "xagapro", strlen(buf));
-	if(!xagapro)
-		xaga = strnstr(buf, "xaga", strlen(buf));
-	if(xaga)
-		sc_err("%s ++\n", __func__);
-	else if(xagapro){
-		return -ENODEV;
-	}
-	else{
-		return -ENODEV;
-	}
-#endif
-	/* detect device on connected i2c bus */
+
 	ret = i2c_smbus_read_byte_data(client, SC8551_PART_INFO_REG);
 	if (IS_ERR_VALUE((unsigned long)ret)) {
 		dev_err(&client->dev, "fail to detect sc8551 on i2c_bus(addr=0x%x), retry\n", client->addr);
 		msleep(250);
 		ret = i2c_smbus_read_byte_data(client, SC8551_PART_INFO_REG);
 		if (IS_ERR_VALUE((unsigned long)ret)) {
+
 			if (!strcmp(client->name, "sc8551_i2c9")) {
 				client->addr = 0x66;
 			} else if (!strcmp(client->name, "sc8551_i2c7")) {
@@ -1043,6 +1060,7 @@ static int sc8551_probe(struct i2c_client *client, const struct i2c_device_id *i
 				dev_err(&client->dev, "fail to detect sc8551 on i2c_bus(addr=0x%x)\n", client->addr);
 				return -ENODEV;
 			}
+
 		}
 	}
 	dev_info(&client->dev, "device id=0x%x\n", ret);
@@ -1055,7 +1073,6 @@ static int sc8551_probe(struct i2c_client *client, const struct i2c_device_id *i
 	chip->dev = dev;
 	i2c_set_clientdata(client, chip);
 
-	//wakeup_source_init(&chip->irq_handle_wakelock, "sc8551_irq_handle_wakelock");
 	INIT_DELAYED_WORK(&chip->irq_handle_work, sc8551_irq_handler);
 	strncpy(chip->model_name, id->name, I2C_NAME_SIZE);
 	chip->regmap = devm_regmap_init_i2c(client, &sc8551_regmap_config);
@@ -1108,7 +1125,9 @@ static int sc8551_probe(struct i2c_client *client, const struct i2c_device_id *i
 	}
 
 	chip->chip_ok = true;
-	fake_work_mode = SC8551_MASTER;
+
+        fake_work_mode = SC8551_MASTER;
+
 	sc_err("%s SC8551 probe success\n", chip->log_tag);
 
 	return 0;
@@ -1179,6 +1198,7 @@ static void sc8551_shutdown(struct i2c_client *client)
 }
 
 static const struct i2c_device_id sc8551_i2c_ids[] = {
+	{ "sc8551_i2c0", SC8551_STANDALONE },
 	{ "sc8551_i2c7", SC8551_STANDALONE },
 	{ "sc8551_i2c9", SC8551_STANDALONE },
 	{ "sc8551_master", SC8551_MASTER },
@@ -1188,6 +1208,7 @@ static const struct i2c_device_id sc8551_i2c_ids[] = {
 MODULE_DEVICE_TABLE(i2c, sc8551_i2c_ids);
 
 static const struct of_device_id sc8551_of_match[] = {
+	{ .compatible = "sc8551_i2c0", .data = (void *)SC8551_STANDALONE},
 	{ .compatible = "sc8551_i2c7", .data = (void *)SC8551_STANDALONE},
 	{ .compatible = "sc8551_i2c9", .data = (void *)SC8551_STANDALONE},
 	{ .compatible = "sc8551_master", .data = (void *)SC8551_MASTER},

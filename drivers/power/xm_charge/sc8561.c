@@ -518,23 +518,23 @@ static int sc8561_get_adc(struct sc8561_device *chip, int channel, u32 *result)
 
 	val = (val_h << 8) | val_l;
 
-	if(channel == ADC_IBUS)
+	if (channel == ADC_IBUS)
 		val = val * SC8561_IBUS_ADC_LSB;
-	else if(channel == ADC_VBUS)
+	else if (channel == ADC_VBUS)
 		val = val * SC8561_VBUS_ADC_LSB;
-	else if(channel == ADC_VUSB)
+	else if (channel == ADC_VUSB)
 		val = val * SC8561_VUSB_ADC_LSB;
-	else if(channel == ADC_VWPC)
+	else if (channel == ADC_VWPC)
 		val = val * SC8561_VWPC_ADC_LSB;
-	else if(channel == ADC_VOUT)
+	else if (channel == ADC_VOUT)
 		val = val * SC8561_VOUT_ADC_LSB;
-	else if(channel == ADC_VBAT)
+	else if (channel == ADC_VBAT)
 		val = val * SC8561_VBAT_ADC_LSB;
-	else if(channel == ADC_IBAT)
+	else if (channel == ADC_IBAT)
 		val = val * SC8561_IBAT_ADC_LSB;
-	else if(channel == ADC_TBAT)
+	else if (channel == ADC_TBAT)
 		val = val * SC8561_TSBAT_ADC_LSB;
-	else if(channel == ADC_TDIE)
+	else if (channel == ADC_TDIE)
 		val = val * SC8561_TDIE_ADC_LSB;
 
 	*result = val;
@@ -607,7 +607,7 @@ static int sc8561_enable_config_func(struct sc8561_device *chip, bool enable)
 	return ret;
 }
 
-static int sc8561_set_operation_mode(struct sc8561_device *chip, int mode)
+static int sc8561_set_div_mode(struct sc8561_device *chip, int mode)
 {
 	unsigned int val = mode;
 	int ret = 0;
@@ -970,7 +970,7 @@ static int sc8561_init_device(struct sc8561_device *chip, int driver_data)
 	ret = sc8561_init_protection(chip, CP_FORWARD_4_TO_1);
 	ret = sc8561_init_adc(chip);
 	ret = sc8561_init_int_src(chip);
-	ret = sc8561_set_operation_mode(chip, SC8561_FORWARD_4_1_CHARGER_MODE);
+	ret = sc8561_set_div_mode(chip, SC8561_FORWARD_4_1_CHARGER_MODE);
 	ret = sc8561_set_busovp(chip, 22000);
 
 	return ret;
@@ -1039,13 +1039,13 @@ static int sc8561_ops_set_div_mode(struct xmc_device *xmc_dev, enum xmc_cp_div_m
 
 	switch (mode) {
 	case XMC_CP_1T1:
-		ret = sc8561_set_operation_mode(chip, SC8561_FORWARD_1_1_CHARGER_MODE);
+		ret = sc8561_set_div_mode(chip, SC8561_FORWARD_1_1_CHARGER_MODE);
 		break;
 	case XMC_CP_2T1:
-		ret = sc8561_set_operation_mode(chip, SC8561_FORWARD_2_1_CHARGER_MODE);
+		ret = sc8561_set_div_mode(chip, SC8561_FORWARD_2_1_CHARGER_MODE);
 		break;
 	case XMC_CP_4T1:
-		ret = sc8561_set_operation_mode(chip, SC8561_FORWARD_4_1_CHARGER_MODE);
+		ret = sc8561_set_div_mode(chip, SC8561_FORWARD_4_1_CHARGER_MODE);
 		break;
 	default:
 		xmc_err("%s set div_mode is unsupported\n", chip->log_tag);
@@ -1218,6 +1218,7 @@ static enum power_supply_property sc8561_power_supply_props[] = {
 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
 	POWER_SUPPLY_PROP_CURRENT_NOW,
 	POWER_SUPPLY_PROP_TEMP,
+	POWER_SUPPLY_PROP_MANUFACTURER,
 };
 
 static int sc8561_get_property(struct power_supply *psy, enum power_supply_property psp, union power_supply_propval *val)
@@ -1250,6 +1251,9 @@ static int sc8561_get_property(struct power_supply *psy, enum power_supply_prope
 			val->intval = 0;
 		else
 			val->intval = data;
+		break;
+	case POWER_SUPPLY_PROP_MANUFACTURER:
+		val->strval = "SC8561";
 		break;
 	default:
 		return -EINVAL;
@@ -1291,21 +1295,21 @@ static int sc8561_psy_init(struct sc8561_device *chip, struct device *dev, int d
 	return 0;
 }
 
-static int sc8561_detect_device(struct sc8561_device *chip, int driver_data)
+static int sc8561_detect_device(struct i2c_client *client, struct sc8561_device *chip, int driver_data)
 {
-	int retry_count = 0, ret = 0;
-	unsigned int data = 0;
+	int retry_count = 0;
+	s32 data = 0;
 
 retry:
-	ret = regmap_read(chip->regmap, SC8561_REG_6E, &data);
-	if (ret < 0) {
+	data = i2c_smbus_read_byte_data(client, SC8561_REG_6E);
+	if (data < 0) {
 		xmc_err("%s failed to read device_id, retry = %d\n", chip->log_tag, retry_count);
 		retry_count++;
 		if (retry_count < 3) {
 			msleep(250);
 			goto retry;
 		} else {
-			return ret;
+			return -1;
 		}
 	}
 
@@ -1320,7 +1324,7 @@ retry:
 		return -1;
 	}
 
-	return ret;
+	return 0;
 }
 
 static int sc8561_probe(struct i2c_client *client, const struct i2c_device_id *id)
@@ -1330,24 +1334,27 @@ static int sc8561_probe(struct i2c_client *client, const struct i2c_device_id *i
 	int ret = 0;
 
 	chip = devm_kzalloc(dev, sizeof(*chip), GFP_KERNEL);
-	if (!chip)
-		return -ENOMEM;
+	if (!chip) {
+		xmc_err("SC8561 probe failed to zalloc chip\n");
+		goto fail;
+	}
 
 	chip->client = client;
 	chip->dev = dev;
 	strcpy(chip->log_tag, "[CP_UNKNOWN]");
 	chip->irq_wakelock = wakeup_source_register(NULL, "sc8561_irq_wakelock");
 
+	ret = sc8561_detect_device(client, chip, id->driver_data);
+	if (ret) {
+		xmc_err("%s failed to detect device\n", chip->log_tag);
+		goto fail;
+	}
+
 	i2c_set_clientdata(client, chip);
    	chip->regmap = devm_regmap_init_i2c(client, &sc8561_regmap_config);
 	if (IS_ERR(chip->regmap)) {
-		return PTR_ERR(chip->regmap);
-	}
-
-	ret = sc8561_detect_device(chip, id->driver_data);
-	if (ret) {
-		xmc_err("%s failed to detect device\n", chip->log_tag);
-		return ret;
+		xmc_err("%s failed to init regmap\n", chip->log_tag);
+		goto fail;
 	}
 
 	ret = sc8561_init_device(chip, id->driver_data);
@@ -1357,25 +1364,25 @@ static int sc8561_probe(struct i2c_client *client, const struct i2c_device_id *i
 	ret = sc8561_parse_dt(chip);
 	if (ret) {
 		xmc_info("%s failed to parse DTS\n", chip->log_tag);
-		return ret;
+		goto fail;
 	}
 
 	ret = sc8561_init_irq(chip);
 	if (ret) {
 		xmc_info("%s failed to int irq\n", chip->log_tag);
-		return ret;
+		goto fail;
 	}
 
 	ret = sc8561_register_charger(chip, id->driver_data);
 	if (ret) {
 		xmc_info("%s failed to register charger\n", chip->log_tag);
-		return ret;
+		goto fail;
 	}
 
 	ret = sc8561_psy_init(chip, dev, id->driver_data);
 	if (ret) {
 		xmc_info("%s failed to init psy\n", chip->log_tag);
-		return ret;
+		goto fail;
 	}
 
 	INIT_DELAYED_WORK(&chip->irq_handle_work, sc8561_irq_handler);
@@ -1383,6 +1390,10 @@ static int sc8561_probe(struct i2c_client *client, const struct i2c_device_id *i
 	chip->chip_ok = true;
 	xmc_info("%s probe success\n", chip->log_tag);
 	return 0;
+
+fail:
+	devm_kfree(dev, chip);
+	return ret;
 }
 
 static int sc8561_suspend(struct device *dev)
@@ -1473,4 +1484,3 @@ bool sc8561_init(void)
 	else
 		return true;
 }
-

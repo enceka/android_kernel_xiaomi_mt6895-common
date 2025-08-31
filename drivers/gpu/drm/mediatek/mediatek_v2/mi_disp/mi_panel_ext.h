@@ -40,6 +40,11 @@ enum KTZ8863A_REG_RW {
 	KTZ8863A_REG_READ,
 };
 
+enum LM36273_REG_RW {
+	LM36273_REG_WRITE,
+	LM36273_REG_READ,
+};
+
 extern struct mi_disp_notifier g_notify_data;
 extern struct LCM_mipi_read_write lcm_mipi_read_write;
 extern struct LCM_led_i2c_read_write lcm_led_i2c_read_write;

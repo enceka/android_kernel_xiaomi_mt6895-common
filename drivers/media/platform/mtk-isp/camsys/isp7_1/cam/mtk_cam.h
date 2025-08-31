@@ -458,6 +458,7 @@ struct mtk_cam_ctx {
 	atomic_t watchdog_cnt;
 	atomic_t watchdog_dumped;
 	atomic_t watchdog_dump_cnt;
+	u64 watchdog_time_diff_ns;
 	struct timer_list watchdog_timer;
 	struct work_struct watchdog_work;
 
@@ -478,6 +479,9 @@ struct mtk_cam_device {
 	//struct platform_device *scp_pdev; /* only for scp case? */
 	phandle rproc_phandle;
 	struct rproc *rproc_handle;
+
+	phandle rproc_ccu_phandle;
+	struct rproc *rproc_ccu_handle;
 
 	struct workqueue_struct *link_change_wq;
 	unsigned int composer_cnt;
@@ -904,12 +908,15 @@ int get_main_sv_pipe_id(struct mtk_cam_device *cam, int used_dev_mask);
 int get_sub_sv_pipe_id(struct mtk_cam_device *cam, int used_dev_mask);
 int get_last_sv_pipe_id(struct mtk_cam_device *cam, int used_dev_mask);
 
+int mtk_cam_dc_last_camsv(int raw_id);
+
 struct mtk_raw_device *get_master_raw_dev(struct mtk_cam_device *cam,
 					  struct mtk_raw_pipeline *pipe);
 struct mtk_raw_device *get_slave_raw_dev(struct mtk_cam_device *cam,
 					 struct mtk_raw_pipeline *pipe);
 struct mtk_raw_device *get_slave2_raw_dev(struct mtk_cam_device *cam,
 					  struct mtk_raw_pipeline *pipe);
+struct mtk_yuv_device *get_yuv_dev(struct mtk_raw_device *raw_dev);
 struct mtk_camsv_device *get_camsv_dev(struct mtk_cam_device *cam,
 					struct mtk_camsv_pipeline *pipe);
 struct mtk_mraw_device *get_mraw_dev(struct mtk_cam_device *cam,

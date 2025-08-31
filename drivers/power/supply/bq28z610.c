@@ -28,18 +28,16 @@
 #include <linux/gpio/consumer.h>
 #include <linux/regmap.h>
 #include <linux/random.h>
-#include <linux/ktime.h> 
+#include <linux/ktime.h>
+#include <linux/gpio.h>
+#include <linux/of_gpio.h>
 #include "bq28z610.h"
 #include "../../misc/hwid/hwid.h"
+#include "mtk_battery.h"
 
-enum product_name {
-	XAGA_NO,
-	XAGA,
-	XAGAPRO,
-};
 
 static int log_level = 1;
-static int product_name = XAGA_NO;
+static ktime_t time_init = -1;
 
 #define fg_err(fmt, ...)					\
 do {								\
@@ -59,105 +57,73 @@ do {								\
 			printk(KERN_ERR "" fmt, ##__VA_ARGS__);	\
 } while (0)
 
-static int __fg_write_byte(struct i2c_client *client, u8 reg, u8 val)
-{
-	s32 ret = 0;
-
-	ret = i2c_smbus_write_byte_data(client, reg, val);
-	if (ret < 0) {
-		fg_info("i2c write byte fail: can't write 0x%02X to reg 0x%02X\n", val, reg);
-		return ret;
-	}
-
-	return 0;
-}
-
-static int __fg_read_word(struct i2c_client *client, u8 reg, u16 *val)
-{
-	s32 ret = 0;
-
-	ret = i2c_smbus_read_word_data(client, reg);
-	if (ret < 0) {
-		fg_info("i2c read word fail: can't read from reg 0x%02X\n", reg);
-		return ret;
-	}
-
-	*val = (u16)ret;
-
-	return 0;
-}
-
-static int __fg_read_block(struct i2c_client *client, u8 reg, u8 *buf, u8 len)
-{
-	int ret = 0, i = 0;
-
-	for(i = 0; i < len; i++) {
-		ret = i2c_smbus_read_byte_data(client, reg + i);
-		if (ret < 0) {
-			fg_info("i2c read reg 0x%02X faild\n", reg + i);
-			return ret;
-		}
-		buf[i] = ret;
-	}
-
-	return ret;
-}
-
-static int __fg_write_block(struct i2c_client *client, u8 reg, u8 *buf, u8 len)
-{
-	int ret = 0, i = 0;
-
-	for(i = 0; i < len; i++) {
-		ret = i2c_smbus_write_byte_data(client, reg + i, buf[i]);
-		if (ret < 0) {
-			fg_info("i2c read reg 0x%02X faild\n", reg + i);
-			return ret;
-		}
-	}
-
-	return ret;
-}
-
-static int fg_write_byte(struct bq_fg_chip *bq, u8 reg, u8 val)
-{
-	int ret;
-
-	mutex_lock(&bq->i2c_rw_lock);
-	ret = __fg_write_byte(bq->client, reg, val);
-	mutex_unlock(&bq->i2c_rw_lock);
-
-	return ret;
-}
+static struct regmap_config fg_regmap_config = {
+	.reg_bits  = 8,
+	.val_bits  = 8,
+	.max_register  = 0xFF,
+};
 
 static int fg_read_word(struct bq_fg_chip *bq, u8 reg, u16 *val)
 {
-	int ret;
+	u8 data[2] = {0, 0};
+	int ret = 0;
 
-	mutex_lock(&bq->i2c_rw_lock);
-	ret = __fg_read_word(bq->client, reg, val);
-	mutex_unlock(&bq->i2c_rw_lock);
+	if(atomic_read(&bq->fg_in_sleep))
+	{
+		fg_err("%s in sleep\n", __func__);
+		return -EINVAL;
+	}
 
+	ret = regmap_raw_read(bq->regmap, reg, data, 2);
+	if (ret) {
+		fg_info("%s I2C failed to read 0x%02x\n", bq->log_tag, reg);
+		return ret;
+	}
+
+	*val = (data[1] << 8) | data[0];
 	return ret;
 }
 
 static int fg_read_block(struct bq_fg_chip *bq, u8 reg, u8 *buf, u8 len)
 {
-	int ret;
+	int ret = 0, i = 0;
+	unsigned int data = 0;
 
-	mutex_lock(&bq->i2c_rw_lock);
-	ret = __fg_read_block(bq->client, reg, buf, len);
-	mutex_unlock(&bq->i2c_rw_lock);
+	if(atomic_read(&bq->fg_in_sleep))
+	{
+		fg_err("%s in sleep\n", __func__);
+		return -EINVAL;
+	}
+
+	for (i = 0; i < len; i++) {
+		ret = regmap_read(bq->regmap, reg + i, &data);
+		if (ret) {
+			fg_info("%s I2C failed to read 0x%02x\n", bq->log_tag, reg + i);
+			return ret;
+		}
+		buf[i] = data;
+	}
 
 	return ret;
 }
 
 static int fg_write_block(struct bq_fg_chip *bq, u8 reg, u8 *data, u8 len)
 {
-	int ret;
+	int ret = 0, i = 0;
 
-	mutex_lock(&bq->i2c_rw_lock);
-	ret = __fg_write_block(bq->client, reg, data, len);
-	mutex_unlock(&bq->i2c_rw_lock);
+	if(atomic_read(&bq->fg_in_sleep))
+	{
+		fg_err("%s in sleep\n", __func__);
+		return -EINVAL;
+	}
+
+	for (i = 0; i < len; i++) {
+		ret = regmap_write(bq->regmap, reg + i, (unsigned int)data[i]);
+		if (ret) {
+			fg_err("%s I2C failed to write 0x%02x\n", bq->log_tag, reg + i);
+			return ret;
+		}
+	}
 
 	return ret;
 }
@@ -226,7 +192,6 @@ static int fg_mac_write_block(struct bq_fg_chip *bq, u16 cmd, u8 *data, u8 len)
 	for (i = 0; i < len; i++)
 		t_buf[i+2] = data[i];
 
-	/*write command/addr, data*/
 	ret = fg_write_block(bq, bq->regs[BQ_FG_REG_ALT_MAC], t_buf, len + 2);
 	if (ret < 0) {
 		fg_err("%s failed to write block\n", bq->log_tag);
@@ -235,8 +200,8 @@ static int fg_mac_write_block(struct bq_fg_chip *bq, u16 cmd, u8 *data, u8 len)
 
 	cksum = fg_checksum(data, len + 2);
 	t_buf[0] = cksum;
-	t_buf[1] = len + 4; /*buf length, cmd, CRC and len byte itself*/
-	/*write checksum and length*/
+	t_buf[1] = len + 4; 
+
 	ret = fg_write_block(bq, bq->regs[BQ_FG_REG_MAC_CHKSUM], t_buf, 2);
 
 	return ret;
@@ -247,32 +212,24 @@ static int fg_sha256_auth(struct bq_fg_chip *bq, u8 *challenge, int length)
 	int ret = 0;
 	u8 cksum_calc = 0, data[2] = {0};
 
-	/*
-	1. The host writes 0x00 to 0x3E.
-	2. The host writes 0x00 to 0x3F
-	*/
 	data[0] = 0x00;
 	data[1] = 0x00;
 	ret = fg_write_block(bq, bq->regs[BQ_FG_REG_ALT_MAC], data, 2);
 	if (ret < 0)
 		return ret;
-	/*
-	3. Write the random challenge should be written in a 32-byte block to address 0x40-0x5F
-	*/
+
 	msleep(2);
 
 	ret = fg_write_block(bq, bq->regs[BQ_FG_REG_MAC_DATA], challenge, length);
 	if (ret < 0)
 		return ret;
 
-	/*4. Write the checksum (2’s complement sum of (1), (2), and (3)) to address 0x60.*/
 	cksum_calc = fg_checksum(challenge, length);
-	ret = fg_write_byte(bq, bq->regs[BQ_FG_REG_MAC_CHKSUM], cksum_calc);
+	ret = regmap_write(bq->regmap, bq->regs[BQ_FG_REG_MAC_CHKSUM], cksum_calc);
 	if (ret < 0)
 		return ret;
 
-	/*5. Write the length to address 0x61.*/
-	ret = fg_write_byte(bq, bq->regs[BQ_FG_REG_MAC_DATA_LEN], length + 4);
+	ret = regmap_write(bq->regmap, bq->regs[BQ_FG_REG_MAC_DATA_LEN], length + 4);
 	if (ret < 0)
 		return ret;
 
@@ -357,7 +314,6 @@ retry:
 		if(bq->i2c_error_count > 0)
 			bq->i2c_error_count = 0;
 	}
-
 	fg_err("%s read FG TBAT = %d\n", bq->log_tag, tbat);
 	if (!tbat)
 		tbat = 2980;
@@ -503,8 +459,8 @@ retry:
 			msleep(10);
 			goto retry;
 		} else {
-			fg_err("%s failed to read FCC\n", bq->log_tag);
-			fcc = pre_fcc;
+                  	fcc = 5160;
+                  	fg_err("%s failed to read FCC,FCC=%d\n", bq->log_tag, fcc);
 			if(bq-> i2c_error_count < 10)
 				bq->i2c_error_count++;
 		}
@@ -534,8 +490,8 @@ retry:
 			msleep(10);
 			goto retry;
 		} else {
-			fg_err("%s failed to read RM\n", bq->log_tag);
-			rm = pre_rm;
+			rm = 718;
+                  	fg_err("%s failed to read RM,RM=%d\n", bq->log_tag, rm);
 			if(bq->i2c_error_count < 10)
 				bq->i2c_error_count++;
 		}
@@ -608,51 +564,7 @@ retry:
 	return soh;
 }
 
-#if 0
-static int fg_read_cv(struct bq_fg_chip *bq)
-{
-	u16 cv = 0;
-	bool retry = false;
-	int ret = 0;
 
-retry:
-	ret = fg_read_word(bq, bq->regs[BQ_FG_REG_CHG_VOL], &cv);
-	if (ret < 0) {
-		if (!retry) {
-			retry = true;
-			msleep(10);
-			goto retry;
-		} else {
-			fg_err("%s failed to read CV\n", bq->log_tag);
-			cv = 4480;
-		}
-	}
-
-	return cv;
-}
-
-static int fg_read_cc(struct bq_fg_chip *bq)
-{
-	u16 cc = 0;
-	bool retry = false;
-	int ret = 0;
-
-retry:
-	ret = fg_read_word(bq, bq->regs[BQ_FG_REG_CHG_CUR], &cc);
-	if (ret < 0) {
-		if (!retry) {
-			retry = true;
-			msleep(10);
-			goto retry;
-		} else {
-			fg_err("%s failed to read CC\n", bq->log_tag);
-			cc = 11000;
-		}
-	}
-
-	return cc;
-}
-#endif
 
 static int fg_read_cyclecount(struct bq_fg_chip *bq)
 {
@@ -785,23 +697,391 @@ static int fg_set_fastcharge_mode(struct bq_fg_chip *bq, bool enable)
 	return ret;
 }
 
+static int calc_delta_time(ktime_t time_last, int *delta_time)
+{
+	ktime_t time_now;
+
+	time_now = ktime_get();
+
+	*delta_time = ktime_ms_delta(time_now, time_last);
+	if (*delta_time < 0)
+		*delta_time = 0;
+
+	fg_dbg("now:%ld, last:%ld, delta:%d\n", time_now, time_last, *delta_time);
+
+	return 0;
+}
+
+#define BATT_HIGH_AVG_CURRENT		1000
+#define NORMAL_TEMP_CHARGING_DELTA	10000
+#define NORMAL_DISTEMP_CHARGING_DELTA	60000
+#define LOW_TEMP_CHARGING_DELTA		5000
+#define LOW_TEMP_DISCHARGING_DELTA	20000
+#define FFC_SMOOTH_LEN			4
+#define FG_RAW_SOC_FULL			10000
+#define FG_REPORT_FULL_SOC		9100
+#define FG_OPTIMIZ_FULL_TIME		80000
+
+struct ffc_smooth {
+	int curr_lim;
+	int time;
+};
+
+struct ffc_smooth ffc_dischg_smooth[FFC_SMOOTH_LEN] = {
+	{0,    150000},
+	{300,  100000},
+	{600,   72000},
+	{1000,  50000},
+};
+
+static int bq_battery_soc_smooth_tracking_sencond(struct bq_fg_chip *bq,
+	int raw_soc, int batt_soc, int soc)
+{
+	static ktime_t changed_time = -1;
+	int unit_time = 0, delta_time = 0;
+	int change_delta = 0;
+	int soc_changed = 0;
+
+	if (bq->tbat < 150) {
+		bq->monitor_delay = FG_MONITOR_DELAY_5S;
+	}
+	if (raw_soc > bq->report_full_rsoc) {
+		if (raw_soc == 10000 && bq->last_soc < 99) {
+			unit_time = 20000;
+			calc_delta_time(changed_time, &change_delta);
+			if (delta_time < 0) {
+				changed_time = ktime_get();
+				delta_time = 0;
+			}
+			delta_time = change_delta / unit_time;
+			soc_changed = min(1, delta_time);
+			if (soc_changed) {
+				soc = bq->last_soc + soc_changed;
+			} else {
+				soc = bq->last_soc;
+			}
+		} else {
+			soc = 100;
+		}
+	} else if (raw_soc > 990) {
+		soc += bq->soc_gap;
+		if (soc > 99)
+			soc = 99;
+	} else {
+		if (raw_soc == 0 && bq->last_soc > 1) {
+			bq->ffc_smooth = false;
+			unit_time = 5000;
+			calc_delta_time(changed_time, &change_delta);
+			delta_time = change_delta / unit_time;
+			if (delta_time < 0) {
+				changed_time = ktime_get();
+				delta_time = 0;
+			}
+			soc_changed = min(1, delta_time);
+			if (soc_changed) {
+				soc = bq->last_soc - soc_changed;
+			} else
+				soc = bq->last_soc;
+		} else {
+			soc = (raw_soc + 89) / 90;
+		}
+	}
+
+	if (soc >= 100)
+		soc = 100;
+	if (soc < 0)
+		soc = batt_soc;
+
+	if (bq->last_soc <= 0)
+		bq->last_soc = soc;
+	if (bq->last_soc != soc) {
+		if(abs(soc - bq->last_soc) > 1){
+			union power_supply_propval pval = {0, };
+			int status,rc;
+
+			rc = power_supply_get_property(bq->batt_psy, POWER_SUPPLY_PROP_STATUS, &pval);
+			status = pval.intval;
+
+			calc_delta_time(changed_time, &change_delta);
+			delta_time = change_delta / LOW_TEMP_CHARGING_DELTA;
+			if (delta_time < 0) {
+				changed_time = ktime_get();
+				delta_time = 0;
+			}
+			soc_changed = min(1, delta_time);
+			if(soc_changed){
+				changed_time = ktime_get();
+			}
+			if(status == POWER_SUPPLY_STATUS_CHARGING){
+				if(soc > bq->last_soc){
+					soc = bq->last_soc + soc_changed;
+					bq->last_soc = soc;
+				}else{
+					soc = bq->last_soc;
+				}
+			} else if(status != POWER_SUPPLY_STATUS_FULL){
+				if(soc < bq->last_soc){
+					soc = bq->last_soc - soc_changed;
+					bq->last_soc = soc;
+				}else{
+					soc = bq->last_soc;
+				}
+			}
+		}else{
+			changed_time = ktime_get();
+			bq->last_soc = soc;
+		}
+	}
+	return soc;
+}
+
+static int bq_battery_soc_smooth_tracking(struct bq_fg_chip *bq,
+		int raw_soc, int batt_soc, int batt_temp, int batt_ma)
+{
+	static int last_batt_soc = -1, system_soc, cold_smooth;
+	static int last_status;
+	int change_delta = 0, rc;
+	int optimiz_delta = 0, status;
+	static ktime_t last_change_time;
+	static ktime_t last_optimiz_time;
+	int unit_time = 0;
+	int soc_changed = 0, delta_time = 0;
+	static int optimiz_soc, last_raw_soc;
+	union power_supply_propval pval = {0, };
+	int batt_ma_avg, i;
+
+	if (bq->optimiz_soc > 0) {
+		bq->ffc_smooth = true;
+		last_batt_soc = bq->optimiz_soc;
+		system_soc = bq->optimiz_soc;
+		last_change_time = ktime_get();
+		bq->optimiz_soc = 0;
+	}
+
+	if (last_batt_soc < 0)
+		last_batt_soc = batt_soc;
+
+	if (raw_soc == FG_RAW_SOC_FULL)
+		bq->ffc_smooth = false;
+
+	if (bq->ffc_smooth) {
+		rc = power_supply_get_property(bq->batt_psy,
+				POWER_SUPPLY_PROP_STATUS, &pval);
+		if (rc < 0) {
+			return -EINVAL;
+		}
+		status = pval.intval;
+		if (batt_soc == system_soc) {
+			bq->ffc_smooth = false;
+			return batt_soc;
+		}
+		if (status != last_status) {
+			if (last_status == POWER_SUPPLY_STATUS_CHARGING
+					&& status == POWER_SUPPLY_STATUS_DISCHARGING)
+				last_change_time = ktime_get();
+			last_status = status;
+		}
+	}
+
+	if (bq->fast_chg && raw_soc >= bq->report_full_rsoc && raw_soc != FG_RAW_SOC_FULL) {
+		if (last_optimiz_time == 0)
+			last_optimiz_time = ktime_get();
+		calc_delta_time(last_optimiz_time, &optimiz_delta);
+		delta_time = optimiz_delta / FG_OPTIMIZ_FULL_TIME;
+		soc_changed = min(1, delta_time);
+		if (raw_soc > last_raw_soc && soc_changed) {
+			last_raw_soc = raw_soc;
+			optimiz_soc += soc_changed;
+			last_optimiz_time = ktime_get();
+			if (optimiz_soc > 100)
+				optimiz_soc = 100;
+			bq->ffc_smooth = true;
+		}
+		if (batt_soc > optimiz_soc) {
+			optimiz_soc = batt_soc;
+			last_optimiz_time = ktime_get();
+		}
+		if (bq->ffc_smooth)
+			batt_soc = optimiz_soc;
+		last_change_time = ktime_get();
+	} else {
+		optimiz_soc = batt_soc + 1;
+		last_raw_soc = raw_soc;
+		last_optimiz_time = ktime_get();
+	}
+
+	calc_delta_time(last_change_time, &change_delta);
+	batt_ma_avg = fg_read_avg_current(bq);
+	if (batt_temp > 150 && !cold_smooth && batt_soc != 0) {
+		if (bq->ffc_smooth && (status == POWER_SUPPLY_STATUS_DISCHARGING ||
+					status == POWER_SUPPLY_STATUS_NOT_CHARGING ||
+					batt_ma_avg > 50)) {
+			for (i = 1; i < FFC_SMOOTH_LEN; i++) {
+				if (batt_ma_avg < ffc_dischg_smooth[i].curr_lim) {
+					unit_time = ffc_dischg_smooth[i-1].time;
+					break;
+				}
+			}
+			if (i == FFC_SMOOTH_LEN) {
+				unit_time = ffc_dischg_smooth[FFC_SMOOTH_LEN-1].time;
+			}
+		}
+	} else {
+		if (batt_ma_avg > BATT_HIGH_AVG_CURRENT)
+			unit_time = LOW_TEMP_CHARGING_DELTA;
+		else
+			unit_time = LOW_TEMP_DISCHARGING_DELTA;
+		if (batt_soc != last_batt_soc)
+			cold_smooth = true;
+		else
+			cold_smooth = false;
+	}
+	if (unit_time > 0) {
+		delta_time = change_delta / unit_time;
+		soc_changed = min(1, delta_time);
+	} else {
+		if (!bq->ffc_smooth)
+			bq->update_now = true;
+	}
+
+
+	if (last_batt_soc < batt_soc && batt_ma < 0)
+		last_batt_soc = bq->update_now ?
+			batt_soc : last_batt_soc + soc_changed;
+	else if (last_batt_soc > batt_soc && batt_ma > 0) {
+		last_batt_soc = bq->update_now ?
+			batt_soc : last_batt_soc - soc_changed;
+	}
+	bq->update_now = false;
+
+	if (system_soc != last_batt_soc) {
+		system_soc = last_batt_soc;
+		last_change_time = ktime_get();
+	}
+
+
+	return system_soc;
+}
+
+static int bq_battery_soc_smooth_tracking_new(struct bq_fg_chip *bq, int raw_soc, int batt_soc, int batt_ma)
+{
+	static int system_soc, last_system_soc;
+	int soc_changed = 0, unit_time = 10000, delta_time = 0, soc_delta = 0;
+	static ktime_t last_change_time = -1;
+	int change_delta = 0;
+	int  rc, charging_status, i=0, batt_ma_avg = 0;
+	union power_supply_propval pval = {0, };
+	static int ibat_pos_count = 0;
+	struct timespec64 time;
+	ktime_t tmp_time = 0;
+
+	tmp_time = ktime_get_boottime();
+	time = ktime_to_timespec64(tmp_time);
+
+	if((batt_ma > 0) && (ibat_pos_count < 10))
+		ibat_pos_count++;
+	else if(batt_ma <= 0)
+		ibat_pos_count = 0;
+
+	rc = power_supply_get_property(bq->batt_psy,
+				POWER_SUPPLY_PROP_STATUS, &pval);
+		if (rc < 0) {
+			fg_info("failed get batt staus\n");
+			return -EINVAL;
+		}
+	charging_status = pval.intval;
+	if (bq->tbat < 150) {
+		bq->monitor_delay = FG_MONITOR_DELAY_3S;
+	}
+	if (!raw_soc) {
+		bq->monitor_delay = FG_MONITOR_DELAY_10S;
+	}
+	if(raw_soc >= bq->report_full_rsoc)
+		system_soc = 100;
+	else {
+		system_soc = ((raw_soc + 97) / 98);
+		if(system_soc > 99)
+			system_soc = 99;
+        }
+	if(last_change_time == -1){
+		last_change_time = ktime_get();
+		if(system_soc != 0)
+			last_system_soc = system_soc;
+		else
+			last_system_soc = batt_soc;
+	}
+	if ((charging_status == POWER_SUPPLY_STATUS_DISCHARGING ||
+		charging_status == POWER_SUPPLY_STATUS_NOT_CHARGING ) && 
+		!bq->rm && bq->tbat < 150 && last_system_soc >= 1) 
+	{
+		batt_ma_avg = fg_read_avg_current(bq);
+		for (i = FFC_SMOOTH_LEN-1; i >= 0; i--) {
+		if (batt_ma_avg > ffc_dischg_smooth[i].curr_lim) {
+			unit_time = ffc_dischg_smooth[i].time;
+			break;
+		}
+		}
+		fg_info("enter low temperature smooth unit_time=%d batt_ma_avg=%d\n", unit_time, batt_ma_avg);
+	}
+
+	soc_delta = abs(system_soc - last_system_soc);
+	if(soc_delta > 1 || (bq->vbat < 3400 && system_soc > 0) || (unit_time != 10000 && soc_delta == 1)){
+		calc_delta_time(last_change_time, &change_delta);
+		delta_time = change_delta / unit_time;
+		if (delta_time < 0) {
+			last_change_time = ktime_get();
+			delta_time = 0;
+		}
+		soc_changed = min(1, delta_time);
+		if (soc_changed) {
+			if(charging_status == POWER_SUPPLY_STATUS_CHARGING && system_soc > last_system_soc)
+				system_soc = last_system_soc + soc_changed;
+			else if(charging_status == POWER_SUPPLY_STATUS_DISCHARGING && system_soc < last_system_soc)
+				system_soc = last_system_soc - soc_changed;
+		} else
+			system_soc = last_system_soc;
+		fg_info("fg jump smooth soc_changed=%d\n", soc_changed);
+	}
+	if(system_soc < last_system_soc)
+		system_soc = last_system_soc - 1;
+	if (((charging_status == POWER_SUPPLY_STATUS_DISCHARGING) && (system_soc > last_system_soc)) || ((charging_status == POWER_SUPPLY_STATUS_CHARGING) && (system_soc < last_system_soc) && (ibat_pos_count < 3) && ((time.tv_sec > 10))))
+		system_soc = last_system_soc;
+	fg_info("smooth_new:sys_soc:%d last_sys_soc:%d soc_delta:%d charging_status:%d unit_time:%d batt_ma_avg=%d\n" ,
+		system_soc, last_system_soc, soc_delta, charging_status, unit_time, batt_ma_avg);
+
+	if(system_soc != last_system_soc){
+		last_change_time = ktime_get();
+		last_system_soc = system_soc;
+	}
+	if(system_soc > 100)
+		system_soc =100;
+	if(system_soc < 0)
+		system_soc =0;
+
+	if ((system_soc == 0) && ((bq->vbat >= 3400) || ((time.tv_sec <= 10)))) {
+		system_soc = 1;
+		fg_err("uisoc::hold 1 when volt > 3400mv. \n");
+	}
+
+	if(bq->last_soc != system_soc){
+		bq->last_soc = system_soc;
+	}
+
+	return system_soc;
+}
+
 static int fg_set_shutdown_mode(struct bq_fg_chip *bq)
 {
 	int ret = 0;
 	u8 data[5] = {0};
 
-	fg_info("%s fg_set_shutdown_mode\n", bq->log_tag);
 	bq->shutdown_mode = true;
 
 	data[0] = 1;
 
 	ret = fg_mac_write_block(bq, FG_MAC_CMD_SHUTDOWN, data, 2);
-	if (ret)
-		fg_err("%s failed to send shutdown cmd 0\n", bq->log_tag);
 
 	ret = fg_mac_write_block(bq, FG_MAC_CMD_SHUTDOWN, data, 2);
-	if (ret)
-		fg_err("%s failed to send shutdown cmd 1\n", bq->log_tag);
 
 	return ret;
 }
@@ -810,7 +1090,6 @@ static bool battery_get_psy(struct bq_fg_chip *bq)
 {
 	bq->batt_psy = power_supply_get_by_name("battery");
 	if (!bq->batt_psy) {
-		fg_err("%s failed to get batt_psy", bq->log_tag);
 		return false;
 	}
 	return true;
@@ -818,8 +1097,10 @@ static bool battery_get_psy(struct bq_fg_chip *bq)
 
 static void fg_update_status(struct bq_fg_chip *bq)
 {
-	int delta_temp = 0;
+	int temp_soc = 0,  delta_temp = 0;
 	static int last_soc = 0, last_temp = 0;
+	ktime_t time_now = -1;
+        struct mtk_battery *gm;
 
 	mutex_lock(&bq->data_lock);
 	bq->cycle_count = fg_read_cyclecount(bq);
@@ -833,11 +1114,24 @@ static void fg_update_status(struct bq_fg_chip *bq)
 	mutex_unlock(&bq->data_lock);
 
 	if (!battery_get_psy(bq)) {
-		fg_err("%s fg_update failed to get battery psy\n", bq->log_tag);
 		bq->ui_soc = bq->rsoc;
 		return;
 	} else {
-          	bq->ui_soc = bq->rsoc;
+                gm = (struct mtk_battery *)power_supply_get_drvdata(bq->batt_psy);
+		time_now = ktime_get();
+		if (time_init != -1 && (time_now - time_init < 10000 ))
+		{
+			bq->ui_soc = bq->rsoc;
+			goto out;
+		}
+		bq->ui_soc = bq_battery_soc_smooth_tracking_new(bq, bq->raw_soc, bq->rsoc, bq->ibat);
+
+		goto out;
+		temp_soc = bq_battery_soc_smooth_tracking(bq, bq->raw_soc, bq->rsoc, bq->tbat, bq->ibat);
+		bq->ui_soc = bq_battery_soc_smooth_tracking_sencond(bq, bq->raw_soc, bq->rsoc, temp_soc);
+
+out:
+
 		delta_temp = abs(last_temp - bq->tbat);
 		if (bq->batt_psy && (last_soc != bq->ui_soc || delta_temp > 5 || bq->ui_soc == 0 || bq->rsoc == 0)) {
 			power_supply_changed(bq->batt_psy);
@@ -1113,6 +1407,15 @@ static int soh_get(struct bq_fg_chip *gm,
 	return 0;
 }
 
+static int bms_slave_connect_error_get(struct bq_fg_chip *gm,
+	struct mtk_bms_sysfs_field_info *attr,
+	int *val)
+{
+	*val = gpio_get_value(gm->slave_connect_gpio);
+	fg_err("%s %d\n", __func__, *val);
+	return 0;
+}
+
 static int i2c_error_count_get(struct bq_fg_chip *gm,
 	struct mtk_bms_sysfs_field_info *attr,
 	int *val)
@@ -1185,6 +1488,54 @@ static ssize_t bms_sysfs_show(struct device *dev,
 	return count;
 }
 
+static int temp_max_get(struct bq_fg_chip *gm,
+	struct mtk_bms_sysfs_field_info *attr,
+	int *val)
+{
+	char data_limetime1[32];
+	int ret = 0;
+
+	memset(data_limetime1, 0, sizeof(data_limetime1));
+
+	ret = fg_mac_read_block(gm, FG_MAC_CMD_LIFETIME1, data_limetime1, sizeof(data_limetime1));
+	*val = data_limetime1[6];
+
+	fg_err("%s %d\n", __func__, *val);
+	return 0;
+}
+
+static int time_ot_get(struct bq_fg_chip *gm,
+	struct mtk_bms_sysfs_field_info *attr,
+	int *val)
+{
+	char data_limetime3[32];
+	char data[32];
+	int ret = 0;
+
+	memset(data_limetime3, 0, sizeof(data_limetime3));
+	memset(data, 0, sizeof(data));
+
+	ret = fg_mac_read_block(gm, FG_MAC_CMD_LIFETIME3, data_limetime3, sizeof(data_limetime3));
+
+	ret = fg_mac_read_block(gm, FG_MAC_CMD_MANU_NAME, data, sizeof(data));
+
+	if (data[2] == 'C') //TI
+	{
+		ret = fg_mac_read_block(gm, FG_MAC_CMD_FW_VER, data, sizeof(data));
+
+		if ((data[3] == 0x0) && (data[4] == 0x1)) //R0 FW
+			*val = ((data_limetime3[15] << 8) | (data_limetime3[14] << 0)) << 2;
+		else if ((data[3] == 0x1) && (data[4] == 0x2)) //R1 FW
+			*val = ((data_limetime3[9] << 8) | (data_limetime3[8] << 0)) << 2;
+	}
+	else if (data[2] == '4') //NVT
+		*val = (data_limetime3[15] << 8) | (data_limetime3[14] << 0);
+
+	fg_err("%s %d\n", __func__, *val);
+	return 0;
+}
+
+
 /* Must be in the same order as BMS_PROP_* */
 static struct mtk_bms_sysfs_field_info bms_sysfs_field_tbl[] = {
 	BMS_SYSFS_FIELD_RW(fastcharge_mode, BMS_PROP_FASTCHARGE_MODE),
@@ -1205,6 +1556,9 @@ static struct mtk_bms_sysfs_field_info bms_sysfs_field_tbl[] = {
 	BMS_SYSFS_FIELD_RO(resistance, BMS_PROP_RESISTANCE),
 	BMS_SYSFS_FIELD_RW(i2c_error_count, BMS_PROP_I2C_ERROR_COUNT),
 	BMS_SYSFS_FIELD_RO(av_current, BMS_PROP_AV_CURRENT),
+	BMS_SYSFS_FIELD_RO(temp_max, BMS_PROP_TEMP_MAX),
+	BMS_SYSFS_FIELD_RO(time_ot, BMS_PROP_TIME_OT),
+	BMS_SYSFS_FIELD_RO(bms_slave_connect_error, BMS_PROP_BMS_SLAVE_CONNECT_ERROR),
 };
 
 int bms_get_property(enum bms_property bp,
@@ -1322,7 +1676,6 @@ static int fg_get_property(struct power_supply *psy, enum power_supply_property 
 		}
 
 		val->intval = bq->ui_soc;
-		//add shutdown delay feature
 		if (bq->enable_shutdown_delay) {
 			if (val->intval == 0) {
 				tem = fg_read_temperature(bq);
@@ -1332,10 +1685,8 @@ static int fg_get_property(struct power_supply *psy, enum power_supply_property 
 				} else
 					power_supply_get_property(bq->batt_psy, POWER_SUPPLY_PROP_STATUS, &pval);
 				if (pval.intval != POWER_SUPPLY_STATUS_CHARGING) {
-					if ((product_name != XAGA) && (product_name != XAGAPRO)){
 						bq->cool_critical_shutdown_vbat = bq->critical_shutdown_vbat;
 						bq->old_critical_shutdown_vbat = bq->critical_shutdown_vbat;
-					}
 					if(bq->shutdown_delay == true)
 						val->intval = 1;
 					else if (((tem > 0) && (bq->cell_voltage[2] >= bq->critical_shutdown_vbat))
@@ -1365,7 +1716,6 @@ static int fg_get_property(struct power_supply *psy, enum power_supply_property 
 				last_shutdown_delay = bq->shutdown_delay;
 				if (bq->fg_psy)
 					power_supply_changed(bq->fg_psy);
-				fg_err("%s power_supply_changed\n", bq->log_tag);
 			}
 		}
 		break;
@@ -1435,7 +1785,7 @@ static char *mtk_bms_supplied_to[] = {
         "battery",
         "usb",
 };
-
+//
 static int fg_prop_is_writeable(struct power_supply *psy, enum power_supply_property prop)
 {
 	int ret;
@@ -1694,35 +2044,16 @@ static int fg_parse_dt(struct bq_fg_chip *bq)
 
 	bq->max_chg_power_120w = of_property_read_bool(node, "max_chg_power_120w");
 	bq->enable_shutdown_delay = of_property_read_bool(node, "enable_shutdown_delay");
+
 	ret = of_property_read_u32(node, "normal_shutdown_vbat_1s", &bq->normal_shutdown_vbat);
-	if (ret)
-		fg_err("%s failed to parse normal_shutdown_vbat_1s\n", bq->log_tag);
 
 	ret = of_property_read_u32(node, "critical_shutdown_vbat_1s", &bq->critical_shutdown_vbat);
-	if (ret)
-		fg_err("%s failed to parse critical_shutdown_vbat_1s\n", bq->log_tag);
 
 	ret = of_property_read_u32(node, "cool_critical_shutdown_vbat_1s", &bq->cool_critical_shutdown_vbat);
-	if (ret)
-		fg_err("%s failed to parse cool_critical_shutdown_vbat_1s\n", bq->log_tag);
-  
-	ret = of_property_read_u32(node, "old_critical_shutdown_vbat_1s", &bq->old_critical_shutdown_vbat);
-	if (ret)
-		fg_err("%s failed to parse old_critical_shutdown_vbat_1s\n", bq->log_tag);
 
-	if ((product_name == XAGA) || (product_name == XAGAPRO)){
-		ret = of_property_read_u32(node, "report_full_rsoc_1s", &bq->report_full_rsoc);
-		if (ret)
-			fg_err("%s failed to parse report_full_rsoc_1s\n", bq->log_tag);
-        }
-	if (product_name == XAGA)
-		bq->report_full_rsoc = 9700;
-	else if (product_name == XAGAPRO)
-		bq->report_full_rsoc = 9500;
+	ret = of_property_read_u32(node, "old_critical_shutdown_vbat_1s", &bq->old_critical_shutdown_vbat);
 
 	ret = of_property_read_u32(node, "soc_gap_1s", &bq->soc_gap);
-	if (ret)
-		fg_err("%s failed to parse soc_gap_1s\n", bq->log_tag);
 
 	of_get_property(node, "soc_decimal_rate", &size);
 	if (size) {
@@ -1732,7 +2063,6 @@ static int fg_parse_dt(struct bq_fg_chip *bq)
 			bq->dec_rate_len =
 				(size / sizeof(*bq->dec_rate_seq));
 			if (bq->dec_rate_len % 2) {
-				fg_err("%s invalid soc decimal rate seq\n", bq->log_tag);
 				return -EINVAL;
 			}
 			of_property_read_u32_array(node,
@@ -1753,11 +2083,8 @@ static int fg_check_device(struct bq_fg_chip *bq)
 	int ret = 0, i = 0;
 
 	ret = fg_mac_read_block(bq, FG_MAC_CMD_DEVICE_NAME, data, 32);
-	if (ret)
-		fg_err("failed to get FG_MAC_CMD_DEVICE_NAME\n");
-	else
-		fg_err("data : %s\n", data);
 
+  
 	for (i = 0; i < 8; i++) {
 		if (data[i] >= 'A' && data[i] <= 'Z')
 			data[i] += 32;
@@ -1780,6 +2107,18 @@ static int fg_check_device(struct bq_fg_chip *bq)
 		strcpy(bq->model_name, "nfg1000a");
 		strcpy(bq->log_tag, "[XMCHG_NFG1000A]");
 	} else if (!strncmp(data, "nfg1000b", 8)) {
+		bq->device_name = BQ_FG_NFG1000B;
+		strcpy(bq->model_name, "nfg1000b");
+		strcpy(bq->log_tag, "[XMCHG_NFG1000B]");
+	} else if (!strncmp(data, "m9@bp4p#", 8)) {
+		bq->device_name = BQ_FG_NFG1000A;
+		strcpy(bq->model_name, "nfg1000a");
+		strcpy(bq->log_tag, "[XMCHG_NFG1000A]");
+	} else if (!strncmp(data, "m12a@bm5t#", 8)) {
+		bq->device_name = BQ_FG_NFG1000A;
+		strcpy(bq->model_name, "nfg1000a");
+		strcpy(bq->log_tag, "[XMCHG_NFG1000A]");
+	} else if (!strncmp(data, "m11r@bm5f#", 8)) {
 		bq->device_name = BQ_FG_NFG1000B;
 		strcpy(bq->model_name, "nfg1000b");
 		strcpy(bq->log_tag, "[XMCHG_NFG1000B]");
@@ -1818,14 +2157,6 @@ static int fg_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	int ret = 0;
 	char *name = NULL;
 
-#if defined(CONFIG_TARGET_PRODUCT_XAGA)
-	const char *sku = get_hw_sku();
-	if (!strncmp(sku, "xagapro", strlen("xagapro")))
-		product_name = XAGAPRO;
-	else if (!strncmp(sku, "xaga", strlen("xaga")))
-		product_name = XAGA;
-#endif
-
 	fg_info("FG probe enter\n");
 	bq = devm_kzalloc(&client->dev, sizeof(*bq), GFP_DMA);
 	if (!bq)
@@ -1849,6 +2180,13 @@ static int fg_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	bq->i2c_error_count = 0;
 	mutex_init(&bq->i2c_rw_lock);
 	mutex_init(&bq->data_lock);
+	atomic_set(&bq->fg_in_sleep, 0);
+
+	bq->regmap = devm_regmap_init_i2c(client, &fg_regmap_config);
+	if (IS_ERR(bq->regmap)) {
+		fg_err("failed to allocate regmap\n");
+		return PTR_ERR(bq->regmap);
+	}
 
 	fg_check_device(bq);
 
@@ -1858,6 +2196,7 @@ static int fg_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		return ret;
 	}
 
+	time_init = ktime_get();
 	fg_update_status(bq);
 
 	ret = fg_init_psy(bq);
@@ -1877,7 +2216,7 @@ static int fg_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	schedule_delayed_work(&bq->monitor_work, msecs_to_jiffies(5000));
 
 	bq->dc = fg_read_dc(bq);
-	fg_info("%s FG probe success\n", bq->log_tag);
+
 
 	return 0;
 }
@@ -1886,6 +2225,8 @@ static int fg_suspend(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct bq_fg_chip *bq = i2c_get_clientdata(client);
+	atomic_set(&bq->fg_in_sleep, 1);
+	fg_err("%s in sleep\n", __func__);
 
 	cancel_delayed_work_sync(&bq->monitor_work);
 
@@ -1896,6 +2237,8 @@ static int fg_resume(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct bq_fg_chip *bq = i2c_get_clientdata(client);
+	atomic_set(&bq->fg_in_sleep, 0);
+	fg_err("%s resume in sleep\n", __func__);
 	if (!bq->bms_wakelock->active)
 		__pm_stay_awake(bq->bms_wakelock);
 	schedule_delayed_work(&bq->monitor_work, 0);

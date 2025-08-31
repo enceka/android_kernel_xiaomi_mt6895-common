@@ -32,7 +32,6 @@
 #include "../mediatek/mediatek_v2/mtk_drm_graphics_base.h"
 #include "../mediatek/mediatek_v2/mtk_log.h"
 #endif
-#include "../mediatek/mediatek_v2/mi_disp/mi_dsi_panel_count.h"
 #include "../mediatek/mediatek_v2/mi_disp/mi_panel_ext.h"
 #include "mi_dsi_panel.h"
 
@@ -396,6 +395,12 @@ static struct LCM_setting_table init_setting_fhdp[] = {
 	{0xED, 03, {0x45, 0x4D, 0x60}},
 	{0xF0, 02, {0xA5, 0xA5}},
 
+	/* flat dimming */
+	{0xF0, 0x02, {0x5A, 0x5A}},
+	{0xB0, 0x03, {0x01, 0x57, 0x92}},
+	{0x92, 0x01, {0x0F}},
+	{0xF0, 0x02, {0xA5, 0xA5}},
+
 	{0x29, 01, {0x00}},
 
 	/* TE fixed */
@@ -486,6 +491,12 @@ static struct LCM_setting_table init_setting_wqhd[] = {
 	{0xE5, 01, {0x15}},
 	{0xED, 03, {0x45, 0x4D, 0x60}},
 	{0xF0, 02, {0xA5, 0xA5}},
+
+	/* flat dimming */
+	{0xF0, 0x02, {0x5A, 0x5A}},
+	{0xB0, 0x03, {0x01, 0x57, 0x92}},
+	{0x92, 0x01, {0x0F}},
+	{0xF0, 0x02, {0xA5, 0xA5}},
 
 	{0x29, 01, {0x00}},
 
@@ -595,15 +606,6 @@ static int lcm_unprepare(struct drm_panel *panel)
 	ctx->prepared = false;
 	ctx->crc_level = 0;
 
-#ifdef CONFIG_MI_DISP_PANEL_COUNT
-	/* add for display fps count*/
-	dsi_panel_fps_count(ctx, 0, 0);
-	/* add for display state count */
-	if (ctx->mi_count.panel_active_count_enable) {
-		dsi_panel_state_count(ctx, 0);
-	}
-#endif
-
 	ctx->reset_gpio =
 		devm_gpiod_get(ctx->dev, "reset", GPIOD_OUT_HIGH);
 	if (IS_ERR(ctx->reset_gpio)) {
@@ -630,9 +632,25 @@ static int lcm_unprepare(struct drm_panel *panel)
 	udelay(2000);
 	lcm_panel_vci_disable(ctx->dev);
 	udelay(2000);
+
+#if !IS_ENABLED(CONFIG_DRM_PANEL_L11A_38_0A_0A_DSC_CMD)
 	lcm_panel_vddi_disable(ctx->dev);
 	udelay(2000);
+#endif
+
 	atomic_set(&doze_enable, 0);
+	return 0;
+}
+
+static int lcm_panel_poweroff(struct drm_panel *panel)
+{
+	struct lcm *ctx = panel_to_lcm(panel);
+
+	if (ctx->prepared)
+		return 0;
+
+	lcm_panel_vddi_disable(ctx->dev);
+	udelay(2000);
 	return 0;
 }
 
@@ -728,15 +746,6 @@ static int lcm_prepare(struct drm_panel *panel)
 #endif
 #ifdef PANEL_SUPPORT_READBACK
 	lcm_panel_get_data(ctx);
-#endif
-
-#ifdef CONFIG_MI_DISP_PANEL_COUNT
-	/* add  for display fps count */
-	dsi_panel_fps_count(ctx, 0, 1);
-	/* add for display state count */
-	if (ctx->mi_count.panel_active_count_enable) {
-		dsi_panel_state_count(ctx, 0);
-	}
 #endif
 
 	return ret;
@@ -958,7 +967,7 @@ static struct mtk_panel_params ext_params_fhdp = {
 	.physical_width_um = 69552,
 	.physical_height_um = 154560,
 	.cmd_null_pkt_en = 1,
-	.cmd_null_pkt_len = 962,
+	.cmd_null_pkt_len = 1562,
 	.output_mode = MTK_PANEL_DSC_SINGLE_PORT,
 	.dsc_params = {
 		.enable = 1,
@@ -1284,10 +1293,6 @@ static void mode_switch_to_120(struct drm_panel *panel,
 			sizeof(mode_120hz_setting) / sizeof(struct LCM_setting_table));
 		ctx->dynamic_fps = 120;
 	}
-#ifdef CONFIG_MI_DISP_PANEL_COUNT
-	/* add  for display fps count */
-	dsi_panel_fps_count(ctx, 120, 1);
-#endif
 }
 
 static void mode_switch_to_60(struct drm_panel *panel,
@@ -1300,10 +1305,6 @@ static void mode_switch_to_60(struct drm_panel *panel,
 			sizeof(mode_60hz_setting) / sizeof(struct LCM_setting_table));
 		ctx->dynamic_fps = 60;
 	}
-#ifdef CONFIG_MI_DISP_PANEL_COUNT
-	/* add  for display fps count */
-	dsi_panel_fps_count(ctx, 60, 1);
-#endif
 }
 
 static void mode_switch_to_wqhd(struct drm_panel *panel,
@@ -1771,6 +1772,11 @@ static int panel_set_dc_crc(struct drm_panel *panel, int hw_brightness_evel,
 		goto err;
 	}
 	ctx = panel_to_lcm(panel);
+	if (!ctx->prepared) {
+		pr_err("%s: panel is unprepare, return\n", __func__);
+		ret = -1;
+		goto err;
+	}
 
 	if (ctx->dc_status) {
 		crc_level = (crc_coef0 * hw_brightness_evel + crc_coef1 + 5000) / 10000;
@@ -1829,7 +1835,7 @@ static int panel_set_dc_crc(struct drm_panel *panel, int hw_brightness_evel,
 	cmd_msg.tx_buf[8] = crc_level_write_cmd8;
 	cmd_msg.tx_len[8] = ARRAY_SIZE(crc_level_write_cmd8);
 
-	ret = mtk_ddic_dsi_send_cmd(&cmd_msg, true, true);
+	ret = mtk_ddic_dsi_send_cmd_queue(&cmd_msg, true, true, true);
 	if (ret != 0) {
 		DDPPR_ERR("%s: failed to send ddic cmd\n", __func__);
 	}
@@ -2138,7 +2144,7 @@ static int panel_set_gir_on(struct drm_panel *panel)
 	cmd_msg.tx_buf[4] = gir_on_write_cmd4;
 	cmd_msg.tx_len[4] = ARRAY_SIZE(gir_on_write_cmd4);
 
-	ret = mtk_ddic_dsi_wait_te_send_cmd(&cmd_msg, true);
+	ret = mtk_ddic_dsi_send_cmd(&cmd_msg, false, false);
 	if (ret != 0) {
 		DDPPR_ERR("%s: failed to send ddic cmd\n", __func__);
 	}
@@ -2196,7 +2202,7 @@ static int panel_set_gir_off(struct drm_panel *panel)
 	cmd_msg.tx_buf[4] = gir_off_write_cmd4;
 	cmd_msg.tx_len[4] = ARRAY_SIZE(gir_off_write_cmd4);
 
-	ret = mtk_ddic_dsi_wait_te_send_cmd(&cmd_msg, false);
+	ret = mtk_ddic_dsi_send_cmd(&cmd_msg, false, false);
 	if (ret != 0) {
 		DDPPR_ERR("%s: failed to send ddic cmd\n", __func__);
 	}
@@ -2542,6 +2548,7 @@ static struct mtk_panel_funcs ext_funcs = {
 	.ext_param_get = mtk_panel_ext_param_get,
 	.set_backlight_cmdq = lcm_setbacklight_cmdq,
 	.mode_switch = mode_switch,
+	.panel_poweroff = lcm_panel_poweroff,
 	.doze_enable = panel_doze_enable,
 	.doze_disable = panel_doze_disable,
 #ifdef CONFIG_MI_DISP
@@ -2740,10 +2747,6 @@ static int lcm_probe(struct mipi_dsi_device *dsi)
 	ret = mtk_panel_ext_create(dev, &ext_params, &ext_funcs, &ctx->panel);
 	if (ret < 0)
 		return ret;
-#endif
-
-#ifdef CONFIG_MI_DISP_PANEL_COUNT
-	dsi_panel_count_init(ctx);
 #endif
 
 	pr_info("l11a_38_0a_0a_dsc_cmd %s-\n", __func__);

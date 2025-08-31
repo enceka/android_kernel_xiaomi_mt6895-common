@@ -107,7 +107,7 @@ static u32 microphone_status = 0;
 static struct dentry* accdet_debugfs_dir;
 #endif
 
-#ifdef CONFIG_TARGET_PRODUCT_XAGA
+#if defined(CONFIG_TARGET_PRODUCT_PEARL) || defined(CONFIG_TARGET_PRODUCT_XAGA)
 #define USB_3_5_UNSUPPORT 1
 #endif
 

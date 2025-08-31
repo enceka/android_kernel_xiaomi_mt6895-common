@@ -4269,6 +4269,7 @@ irqreturn_t aw86927_irq(int irq, void *data)
 								  false);
 					aw86927->rtp_cnt = 0;
 					aw86927->rtp_init = 0;
+					pm_relax(aw86927->dev);
 					mutex_unlock(&aw86927->rtp_lock);
 					break;
 				}
@@ -4301,10 +4302,12 @@ irqreturn_t aw86927_irq(int irq, void *data)
 								   false);
 					aw86927->rtp_cnt = 0;
 					aw86927->rtp_init = 0;
+					pm_relax(aw86927->dev);
 					mutex_unlock(&aw86927->rtp_lock);
 					break;
 				}
 			}
+			pm_relax(aw86927->dev);
 			mutex_unlock(&aw86927->rtp_lock);
 		}
 
@@ -4533,6 +4536,7 @@ int aw86927_haptics_playback(struct input_dev *dev, int effect_id,
 		aw86927->state = 1;
 	if (val <= 0)
 		aw86927->state = 0;
+	pm_relax(aw86927->dev);
 	hrtimer_cancel(&aw86927->timer);
 
 	if (aw86927->effect_type == FF_CONSTANT &&

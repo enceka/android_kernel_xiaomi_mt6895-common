@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (c) 2019 MediaTek Inc.
-// Copyright (C) 2022 XiaoMi, Inc.
+
 /*****************************************************************************
  *
  * Filename:
@@ -433,9 +433,9 @@ static kal_uint16 gain2reg(struct subdrv_ctx *ctx, const kal_uint16 gain)
 	kal_uint16 reg_gain = 0x0;
 	reg_gain = gain * 256 / BASEGAIN;
 
-	if (reg_gain < 256)
+	if(reg_gain < 256)
 		reg_gain = 256;
-	else if (reg_gain > 3968)
+	else if(reg_gain > 3968)
 		reg_gain = 3968;
 
 	return reg_gain;
@@ -825,7 +825,7 @@ static kal_uint32 capture(struct subdrv_ctx *ctx,
 
 	capture_setting(ctx, ctx->current_fps);
 	//set_mirror_flip(ctx, ctx->mirror);
-	if (ctx->test_pattern == KAL_TRUE) {
+	if(ctx->test_pattern == KAL_TRUE) {
 		write_cmos_sensor_8(ctx, 0x5000, (read_cmos_sensor_8(ctx, 0x5000) & 0xBF) | 0x00);
 	}
 
@@ -1278,7 +1278,7 @@ static kal_uint32 get_sensor_temperature(struct subdrv_ctx *ctx)
 {
 	UINT16 temperature;
 	INT32 temperature_convert;
-
+	
 	//if need read sensor temperature write below registers on initial setting
 	/***************************************
 	write_cmos_sensor_8(ctx, 0x4d00, 0x03);
@@ -1288,7 +1288,7 @@ static kal_uint32 get_sensor_temperature(struct subdrv_ctx *ctx)
 	write_cmos_sensor_8(ctx, 0x4d04, 0xb2);
 	write_cmos_sensor_8(ctx, 0x4d05, 0xe1);
 	*****************************************/
-
+	
 	write_cmos_sensor_8(ctx, 0x4d12, 0x01);
 	temperature = read_cmos_sensor_8(ctx, 0x4d13) << 8 |
 					read_cmos_sensor_8(ctx, 0x4d14);

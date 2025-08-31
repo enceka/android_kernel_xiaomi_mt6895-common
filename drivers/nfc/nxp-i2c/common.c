@@ -98,8 +98,13 @@ void gpio_set_ven(struct nfc_dev *nfc_dev, int value)
 
 		gpio_set_value(nfc_gpio->ven, value);
 		/* hardware dependent delay */
-		usleep_range(NFC_GPIO_SET_WAIT_TIME_US,
+		if (value == 0) {
+			usleep_range(2*NFC_GPIO_SET_WAIT_TIME_US,
+			     2*NFC_GPIO_SET_WAIT_TIME_US + 100);
+		} else {
+			usleep_range(NFC_GPIO_SET_WAIT_TIME_US,
 			     NFC_GPIO_SET_WAIT_TIME_US + 100);
+		}
 	}
 }
 

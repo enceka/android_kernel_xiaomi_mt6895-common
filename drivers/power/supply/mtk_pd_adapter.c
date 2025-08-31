@@ -304,6 +304,12 @@ static int pd_tcp_notifier_call(struct notifier_block *pnb,
 		pr_info("%s: tcpc received uvdm message.\n", __func__);
 		ret = srcu_notifier_call_chain(&adapter->evt_nh,
 			MTK_PD_UVDM, &noti->uvdm_msg);
+		break;
+	case TCP_NOTIFY_SOFT_RESET:
+		pr_info("%s: tcpc received soft reset.\n", __func__);
+		ret = srcu_notifier_call_chain(&adapter->evt_nh,
+			MTK_PD_CONNECT_SOFT_RESET, NULL);
+		break;
 	case TCP_NOTIFY_SINK_VBUS:
 		sink_mv = noti->vbus_state.mv;
 		sink_ma = noti->vbus_state.ma;
@@ -788,13 +794,13 @@ static int ssdev_typec_filter_apdo_power_for_report(int apdo_max, int  maxium_pp
 		else //other such as 40W, we do not show the animaton below 50w
 		   return SSDEV_APDO_MAX_33W;
 	}
-	else //1S and maxium power is 67w projects
+	else //1S and maxium power is 67w projects,3A cable apdo max only 33W for non-1/4 charger ic
 	{
 		if (apdo_max >=  66)
 		    return SSDEV_APDO_MAX_67W;
 		else if (apdo_max >= 60 && apdo_max < 66)
 		    return SSDEV_APDO_MAX_65W;
-		else if (apdo_max >= 55 && apdo_max < 60 )
+		else if (apdo_max >= 55 && apdo_max < 60)
 		    return SSDEV_APDO_MAX_55W;
 		else if (apdo_max >= 50 && apdo_max < 55)
 		    return SSDEV_APDO_MAX_50W;
@@ -893,7 +899,16 @@ APDO_REGAIN:
 				tacap->type[i] = pd_cap.type[i];
 				if (tacap->maxwatt[i] > apdo_max)
 					apdo_max = tacap->maxwatt[i];
-
+				#if  defined (CONFIG_TARGET_PRODUCT_YUECHU)
+				if(pd_cap.max_mv[i] == 20000) {
+					tacap->ma[i] = pd_cap.ma[i-1];
+					tacap->max_mv[i] = pd_cap.max_mv[i-1];
+					tacap->min_mv[i] = pd_cap.min_mv[i-1];
+					tacap->maxwatt[i] = tacap->max_mv[i-1] * tacap->ma[i-1];
+					tacap->type[i] = pd_cap.type[i-1];
+					apdo_max = tacap->maxwatt[i-1];
+				}
+				#endif
 				chr_err("[%s]VBUS = [%d,%d], IBUS = %d, WATT = %d, TYPE = %d\n",
 					__func__, tacap->min_mv[i], tacap->max_mv[i], tacap->ma[i], tacap->maxwatt[i], tacap->type[i]);
 			}

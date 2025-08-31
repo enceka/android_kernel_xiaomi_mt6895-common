@@ -1,9 +1,4 @@
-/*
- * Copyright (C) 2022 XiaoMi, Inc.
- *
- * SPDX-License-Identifier: GPL-2.0-only
- *
- */
+/* SPDX-License-Identifier: GPL-2.0-only */
 #ifndef __XIAOMI__TOUCH_H
 #define __XIAOMI__TOUCH_H
 #include <linux/device.h>
@@ -201,7 +196,6 @@ extern int update_touch_rawdata(void);
 
 extern int update_clicktouch_raw(void);
 
-extern void last_touch_events_collect(int slot, int state);
 
 int xiaomi_touch_set_suspend_state(int state);
 

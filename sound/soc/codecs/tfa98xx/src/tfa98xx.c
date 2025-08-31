@@ -88,7 +88,7 @@ static int tfa98xx_kmsg_regs = 0;
 static int tfa98xx_ftrace_regs = 0;
 
 static char *fw_name = "tfa98xx.cnt";
-#if defined(CONFIG_TARGET_PRODUCT_MATISSE) || defined(CONFIG_TARGET_PRODUCT_RUBENS) || defined(CONFIG_TARGET_PRODUCT_XAGA)
+#if defined(CONFIG_TARGET_PRODUCT_MATISSE) || defined(CONFIG_TARGET_PRODUCT_RUBENS) || defined(CONFIG_TARGET_PRODUCT_XAGA) || defined(CONFIG_TARGET_PRODUCT_REMBRANDT) || defined(CONFIG_TARGET_PRODUCT_PEARL)
 module_param(fw_name, charp, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(fw_name, "TFA98xx DSP firmware (container file) name.");
 #endif
@@ -1406,7 +1406,7 @@ static int tfa98xx_set_profile(struct snd_kcontrol *kcontrol,
 
 	/* update mixer profile */
 	tfa98xx_mixer_profile = new_profile;
-#if defined(CONFIG_TARGET_PRODUCT_MATISSE) || defined(CONFIG_TARGET_PRODUCT_RUBENS) || defined(CONFIG_TARGET_PRODUCT_XAGA)
+#if defined(CONFIG_TARGET_PRODUCT_MATISSE) || defined(CONFIG_TARGET_PRODUCT_RUBENS) || defined(CONFIG_TARGET_PRODUCT_XAGA) || defined(CONFIG_TARGET_PRODUCT_REMBRANDT) || defined(CONFIG_TARGET_PRODUCT_PEARL)
 			pr_info("%s select profile is %d ", __func__, tfa98xx_mixer_profile);
 			if (1 == tfa98xx_mixer_profile) {
 				if (gpio_is_valid(tfa98xx->spk_sw_gpio)) {
@@ -3245,6 +3245,8 @@ static int tfa98xx_mute(struct snd_soc_dai *dai, int mute, int stream)
 	struct tfa98xx *tfa98xx = snd_soc_codec_get_drvdata(codec);
 #endif
 	dev_info(&tfa98xx->i2c->dev, "%s: state: %d\n", __func__, mute);
+	//ALPS07720650
+	dev_info(&tfa98xx->i2c->dev, "%s: playback=%d, capture=%d\n", __func__, dai->stream_active[0], dai->stream_active[1]);
 
 	if (no_start) {
 		pr_debug("no_start parameter set no tfa_dev_start or tfa_dev_stop, returning\n");
@@ -3282,7 +3284,7 @@ static int tfa98xx_mute(struct snd_soc_dai *dai, int mute, int stream)
 			return 0;
 		mutex_lock(&tfa98xx->dsp_lock);
 #ifdef TFA_NON_DSP_SOLUTION
-#if defined(CONFIG_TARGET_PRODUCT_MATISSE) || defined(CONFIG_TARGET_PRODUCT_RUBENS) || defined(CONFIG_TARGET_PRODUCT_XAGA)
+#if defined(CONFIG_TARGET_PRODUCT_MATISSE) || defined(CONFIG_TARGET_PRODUCT_RUBENS) || defined(CONFIG_TARGET_PRODUCT_XAGA) || defined(CONFIG_TARGET_PRODUCT_REMBRANDT) || defined(CONFIG_TARGET_PRODUCT_PEARL)
 		if (strcmp (tfa_cont_profile_name (tfa98xx, tfa98xx_mixer_profile), "handset") != 0
 				&& !(strstr(tfaContProfileName(tfa98xx->tfa->cnt, tfa98xx->tfa->dev_idx, tfa98xx_mixer_profile), ".standby") != NULL)) {
 			tfa98xx_send_mute_cmd(TFA_KCONTROL_VALUE_ENABLED);
@@ -3295,7 +3297,7 @@ static int tfa98xx_mute(struct snd_soc_dai *dai, int mute, int stream)
 #endif
 		tfa_dev_stop(tfa98xx->tfa);
 		tfa98xx->dsp_init = TFA98XX_DSP_INIT_STOPPED;
-#if defined(CONFIG_TARGET_PRODUCT_MATISSE) || defined(CONFIG_TARGET_PRODUCT_RUBENS) || defined(CONFIG_TARGET_PRODUCT_XAGA)
+#if defined(CONFIG_TARGET_PRODUCT_MATISSE) || defined(CONFIG_TARGET_PRODUCT_RUBENS) || defined(CONFIG_TARGET_PRODUCT_XAGA) || defined(CONFIG_TARGET_PRODUCT_REMBRANDT) || defined(CONFIG_TARGET_PRODUCT_PEARL)
 		if (gpio_is_valid(tfa98xx->spk_sw_gpio)) {
 			gpio_direction_output(tfa98xx->spk_sw_gpio, 0);
 		}
@@ -3308,7 +3310,7 @@ static int tfa98xx_mute(struct snd_soc_dai *dai, int mute, int stream)
 		if (stream == SNDRV_PCM_STREAM_PLAYBACK) {
 			tfa98xx->pstream = 1;
 #ifdef TFA_NON_DSP_SOLUTION
-#if defined(CONFIG_TARGET_PRODUCT_MATISSE) || defined(CONFIG_TARGET_PRODUCT_RUBENS) || defined(CONFIG_TARGET_PRODUCT_XAGA)
+#if defined(CONFIG_TARGET_PRODUCT_MATISSE) || defined(CONFIG_TARGET_PRODUCT_RUBENS) || defined(CONFIG_TARGET_PRODUCT_XAGA) || defined(CONFIG_TARGET_PRODUCT_REMBRANDT) || defined(CONFIG_TARGET_PRODUCT_PEARL)
 			if (tfa98xx->tfa->is_probus_device
 					&& (strcmp (tfa_cont_profile_name (tfa98xx, tfa98xx_mixer_profile), "handset") != 0)
 					&& !(strstr(tfaContProfileName(tfa98xx->tfa->cnt, tfa98xx->tfa->dev_idx, tfa98xx_mixer_profile), ".standby") != NULL)) {
@@ -3349,6 +3351,7 @@ static const struct snd_soc_dai_ops tfa98xx_dai_ops = {
 	.set_tdm_slot = tfa98xx_set_tdm_slot,
 	.hw_params = tfa98xx_hw_params,
 	.mute_stream = tfa98xx_mute,
+	.no_capture_mute = 1,	// ALPS07720650
 };
 
 static struct snd_soc_dai_driver tfa98xx_dai[] = {

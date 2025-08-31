@@ -827,7 +827,7 @@ static int ln8000_init_device(struct ln8000_info *info)
 
 	return 0;
 }
-/*
+
 static int ln8000_check_regmap_data(struct ln8000_info *info)
 {
         u8 regulation_ctrl;
@@ -856,7 +856,7 @@ static int ln8000_check_regmap_data(struct ln8000_info *info)
 
         return 0;
 }
-*/
+
 /**
  * Support power_supply platform for charger block.
  * propertis are compatible by Xiaomi platform
@@ -1548,6 +1548,7 @@ static int ln8000_parse_dt(struct ln8000_info *info)
 	pdata->tdie_prot_disable    = of_property_read_bool(np, "ln8000_charger,tdie-prot-disable");
 	pdata->tdie_reg_disable     = of_property_read_bool(np, "ln8000_charger,tdie-reg-disable");
 	pdata->revcurr_prot_disable = of_property_read_bool(np, "ln8000_charger,revcurr-prot-disable");
+	pdata->reset_prevent_enable = of_property_read_bool(np, "ln8000_charger,reset-prevent-enable");
 
 #ifdef LN8000_DUAL_CONFIG
 	/* override device tree */
@@ -1569,6 +1570,7 @@ static int ln8000_parse_dt(struct ln8000_info *info)
 	ln_info("tdie_prot_disable = %d\n", pdata->tdie_prot_disable);
 	ln_info("tdie_reg_disable = %d\n", pdata->tdie_reg_disable);
 	ln_info("revcurr_prot_disable = %d\n", pdata->revcurr_prot_disable);
+	ln_info("reset_prevent_enable = %d\n", pdata->reset_prevent_enable);
 
 	return 0;
 }
@@ -1829,6 +1831,18 @@ static int ln8000_enable_charge(struct charger_device *chg_dev, bool enable)
 	return 0;
 }
 
+static int ln8000_cp_init_check(struct charger_device *chg_dev)
+{
+	struct ln8000_info *info = charger_get_data(chg_dev);
+
+	/* Do not soft reset ln8000, init only */
+	if (info->pdata->reset_prevent_enable) {
+		ln8000_check_regmap_data(info);
+	}
+	ln_info("reset_prevent_enable=%d\n", info->pdata->reset_prevent_enable);
+
+	return 0;
+}
 
 static int ln8000_cp_reset_check(struct charger_device *chg_dev)
 {
@@ -2006,6 +2020,7 @@ static const struct charger_ops ln8000_chg_ops = {
 	//.get_vbus_error_status = bq2597x_get_vbus_error_status,
 	//.get_reg_status = bq2597x_get_reg_status,
 	.cp_reset_check = ln8000_cp_reset_check,
+	.cp_init_check = ln8000_cp_init_check,
 };
 
 
@@ -2057,6 +2072,7 @@ static int cp_ibus_get(struct ln8000_info *gm,
 		*val = data/1000;
 	} else
 		*val = 0;
+	chr_err("%s: dev=%d, cp_ibus=%d\n", __func__,  gm->dev_role, *val);
 	//chr_err("%s %d\n", __func__, *val);
 	return 0;
 }
@@ -2220,11 +2236,14 @@ static int ln8000_probe(struct i2c_client *client, const struct i2c_device_id *i
 	char *xagapro = strnstr(buf, "xagapro", strlen(buf));
 	if(!xagapro)
 		xaga = strnstr(buf, "xaga", strlen(buf));
+	dev_err(&client->dev, "%s buf: %s, xaga = %d, xagapro = %d\n", __func__, buf, xaga ? 1 : 0, xagapro ? 1 : 0);
 	if(xaga)
 		dev_err(&client->dev, "%s ++\n", __func__);
 	else if(xagapro){
+		dev_err(&client->dev, "%s exit\n", __func__);
 		return -ENODEV;
 	}else{
+		dev_err(&client->dev, "%s project_name error exit\n", __func__);
 		return -ENODEV;
 	}
 #endif

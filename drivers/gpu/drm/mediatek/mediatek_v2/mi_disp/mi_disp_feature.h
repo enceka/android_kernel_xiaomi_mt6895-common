@@ -64,6 +64,7 @@ struct disp_display {
 	struct input_handler *input_handler;
 	struct kthread_work input_event_work;
 #endif
+	struct disp_lhbm_fod *lhbm_fod_ptr;
 };
 
 struct disp_feature {

@@ -86,7 +86,7 @@ static int mtk_spk_i2c_probe(struct i2c_client *client,
 		mtk_spk_type = i;
 		break;
 	}
-
+	dev_info(&client->dev, "%s() mtk_spk_type:%d\n", __func__,mtk_spk_type);
 	return ret;
 }
 
@@ -176,6 +176,10 @@ int mtk_spk_update_info(struct snd_soc_card *card,
 	} else {
 		mtk_spk_i2s_out = i2s_set[0];
 		mtk_spk_i2s_in = i2s_set[1];
+		dev_err(&pdev->dev,
+			 "%s(), FEYNMAN ok read mediatek,spk-i2s, mtk_spk_i2s_out is %d , mtk_spk_i2s_in is %d",
+			 mtk_spk_i2s_out,mtk_spk_i2s_in,
+			 __func__);
 	}
 
 	if (mtk_spk_i2s_out > MTK_SPK_I2S_TYPE_NUM ||

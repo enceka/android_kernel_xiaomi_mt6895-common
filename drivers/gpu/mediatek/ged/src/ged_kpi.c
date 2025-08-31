@@ -84,6 +84,12 @@
 #define GED_KPI_FRC_SW_VSYNC_MODE   3
 #define GED_KPI_FRC_MODE_TYPE       int
 
+enum {
+	g_idle_set_finish,
+	g_idle_set_prepare,
+	g_idle_fix
+};
+
 struct GED_KPI_HEAD {
 	int pid;
 	int i32Count;
@@ -261,6 +267,8 @@ static unsigned int is_GED_KPI_enabled = 1;
 #endif
 
 static unsigned int g_force_gpu_dvfs_fallback;
+static int idle_fw_set_flag;
+static int g_is_idle_fw_enable;
 static int g_fb_dvfs_threshold = 80;
 module_param(g_fb_dvfs_threshold, int, 0644);
 
@@ -1010,6 +1018,19 @@ static void ged_kpi_work_cb(struct work_struct *psWork)
 				goto work_cb_end;
 			}
 
+			/* powerhal scenario set default 5ms */
+			if (idle_fw_set_flag == g_idle_set_prepare) {
+				if (!g_is_idle_fw_enable) {
+					mtk_set_gpu_idle(5);
+					idle_fw_set_flag = g_idle_set_finish;
+				} else {
+					if (g_target_fps_default <= 60)
+						mtk_set_gpu_idle(0);
+					else
+						mtk_set_gpu_idle(5);
+					idle_fw_set_flag = g_idle_set_finish;
+				}
+			}
 			/* new data */
 			psKPI->pid = psTimeStamp->pid;
 			psKPI->ullWnd = psTimeStamp->ullWnd;
@@ -1920,6 +1941,11 @@ unsigned int ged_kpi_get_cur_avg_gpu_freq(void)
 #endif /* MTK_GED_KPI */
 }
 /* ------------------------------------------------------------------- */
+unsigned int ged_kpi_get_fw_idle(void)
+{
+	return g_is_idle_fw_enable;
+}
+/* ------------------------------------------------------------------- */
 void ged_dfrc_fps_limit_cb(unsigned int target_fps)
 {
 	g_target_fps_default =
@@ -1930,6 +1956,7 @@ void ged_dfrc_fps_limit_cb(unsigned int target_fps)
 	GED_LOGI("[GED_KPI] dfrc_fps:%d, dfrc_time %u\n",
 		g_target_fps_default, g_target_time_default);
 #endif /* GED_KPI_DEBUG */
+	idle_fw_set_flag = g_idle_set_prepare;
 	if (target_fps <= 60)
 		mtk_set_gpu_idle(0);
 	else
@@ -2055,6 +2082,13 @@ void ged_kpi_set_target_FPS_margin(u64 ulID, int target_FPS,
 #endif /* MTK_GED_KPI */
 }
 EXPORT_SYMBOL(ged_kpi_set_target_FPS_margin);
+/* ------------------------------------------------------------------- */
+void ged_kpi_set_fw_idle(unsigned int time)
+{
+	g_is_idle_fw_enable = time;
+	idle_fw_set_flag = g_idle_set_prepare;
+}
+EXPORT_SYMBOL(ged_kpi_set_fw_idle);
 /* ------------------------------------------------------------------- */
 
 static GED_BOOL ged_kpi_find_riskyBQ_func(unsigned long ulID,

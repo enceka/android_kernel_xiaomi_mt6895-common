@@ -182,6 +182,7 @@ struct charger_ops {
 	int (*get_vbus_adc)(struct charger_device *dev, u32 *vbus);
 	int (*get_ibus_adc)(struct charger_device *dev, u32 *ibus);
 	int (*get_ibat_adc)(struct charger_device *dev, u32 *ibat);
+	int (*get_charge_ic_stat)(struct charger_device *dev, u32 *stat);
 	int (*get_tchg_adc)(struct charger_device *dev, int *tchg_min,
 		int *tchg_max);
 	int (*get_ts_temp)(struct charger_device *dev, int *value);
@@ -221,6 +222,7 @@ struct charger_ops {
 	/* For LN8000 */
 	int (*enable_bypass)(struct charger_device *dev, bool en);
 	int (*cp_reset_check)(struct charger_device *chg_dev);
+	int (*cp_init_check)(struct charger_device *chg_dev);
 };
 
 static inline void *charger_dev_get_drvdata(
@@ -257,6 +259,7 @@ extern int charger_dev_is_enabled(struct charger_device *charger_dev, bool *en);
 extern int charger_dev_is_bypass_enabled(struct charger_device *charger_dev, bool *en);
 extern int charger_dev_cp_get_bypass_support(struct charger_device *charger_dev, bool *en);
 extern int charger_dev_cp_reset_check(struct charger_device *charger_dev);
+extern int charger_dev_cp_init_check(struct charger_device *charger_dev);
 extern int charger_dev_plug_in(struct charger_device *charger_dev);
 extern int charger_dev_plug_out(struct charger_device *charger_dev);
 extern int charger_dev_set_charging_current(
@@ -360,6 +363,8 @@ extern int charger_dev_get_ibus(
 	struct charger_device *charger_dev, u32 *ibus);
 extern int charger_dev_get_ibat(
 	struct charger_device *charger_dev, u32 *ibat);
+extern int charger_dev_get_charge_ic_stat(
+	struct charger_device *charger_dev, u32 *stat);
 extern int charger_dev_get_temperature(
 	struct charger_device *charger_dev, int *tchg_min,
 		int *tchg_max);

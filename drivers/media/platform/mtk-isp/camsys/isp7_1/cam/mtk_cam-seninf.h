@@ -1,11 +1,11 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /* Copyright (c) 2019 MediaTek Inc. */
-// Copyright (C) 2022 XiaoMi, Inc.
 
 #ifndef __MTK_CAM_SENINF_H__
 #define __MTK_CAM_SENINF_H__
 
 #include <linux/kthread.h>
+#include <linux/remoteproc.h>
 #include <media/v4l2-subdev.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-fwnode.h>
@@ -33,6 +33,7 @@ struct seninf_cam_mux {
 	int idx;
 };
 
+#define DT_REMAP_MAX_CNT 4
 struct seninf_vc {
 	u8 vc;
 	u8 dt;
@@ -46,6 +47,7 @@ struct seninf_vc {
 	u16 exp_hsize;
 	u16 exp_vsize;
 	u8 bit_depth;
+	u8 dt_remap_to_type;
 };
 
 struct seninf_vcinfo {
@@ -91,6 +93,10 @@ struct seninf_core {
 	void __iomem *reg_ana;
 	int refcnt;
 
+	/* CCU control flow */
+	phandle rproc_ccu_phandle;
+	struct rproc *rproc_ccu_handle;
+
 	/* platform properties */
 	int cphy_settle_delay_dt;
 	int dphy_settle_delay_dt;
@@ -112,7 +118,7 @@ struct seninf_core {
 	unsigned int fifo_overrun_detection_cnt;
 	/* cam_mux h/v size irq */
 	unsigned int size_err_detection_cnt;
-#ifdef ERR_DETECT_TEST
+#ifdef ERR_DETECT_TEST	
 	/* enable csi err detect flag */
 	unsigned int err_detect_test_flag;
 #endif

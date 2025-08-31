@@ -29,6 +29,9 @@
 #include "mtk_drm_ddp_addon.h"
 #include "mtk_disp_pmqos.h"
 #include "slbc_ops.h"
+#ifdef CONFIG_MI_DISP
+#include "mi_disp/mi_disp_esd_check.h"
+#endif
 #define MAX_CRTC 3
 #define OVL_LAYER_NR 12L
 #define OVL_PHY_LAYER_NR 4L
@@ -367,6 +370,7 @@ enum MTK_CRTC_PROP {
 	CRTC_PROP_MSYNC2_0_ENABLE,
 	CRTC_PROP_SKIP_CONFIG,
 	CRTC_PROP_OVL_DSI_SEQ,
+	CRTC_PROP_OUTPUT_SCENARIO,
 #ifdef CONFIG_MI_DISP_FOD_SYNC
 	/*MI FOD SYNC*/
 	CRTC_PROP_MI_FOD_SYNC_INFO,
@@ -850,6 +854,9 @@ struct mtk_drm_crtc {
 
 	atomic_t force_high_step;
 	int force_high_enabled;
+#ifdef CONFIG_MI_DISP_ESD_CHECK
+	struct mi_esd_ctx *mi_esd_ctx;
+#endif
 };
 
 struct mtk_crtc_state {
@@ -887,6 +894,8 @@ struct mtk_cmdq_cb_data {
 	bool is_mml;
 	bool leave_mml_scn;
 	unsigned int pres_fence_idx;
+	struct drm_framebuffer *wb_fb;
+	unsigned int wb_fence_idx;
 };
 
 extern unsigned int disp_spr_bypass;
@@ -1056,6 +1065,11 @@ unsigned int mtk_read_dummy_backup_slot_table(struct mtk_drm_crtc *mtk_crtc,
 unsigned int mtk_get_plane_slot_idx(struct mtk_drm_crtc *mtk_crtc, unsigned int idx);
 void mtk_gce_backup_slot_backup(struct mtk_drm_crtc *mtk_crtc);
 void mtk_gce_backup_slot_restore(struct mtk_drm_crtc *mtk_crtc);
+
+//CWB
+int mtk_drm_cwb_copy_buf(struct drm_crtc *crtc,
+			  struct mtk_cwb_info *cwb_info,
+			  void *buffer, unsigned int buf_idx);
 
 /* ********************* Legacy DISP API *************************** */
 unsigned int DISP_GetScreenWidth(void);

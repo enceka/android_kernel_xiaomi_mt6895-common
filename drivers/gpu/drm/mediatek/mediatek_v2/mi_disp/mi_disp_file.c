@@ -29,6 +29,7 @@
 #include "mi_dsi_panel.h"
 #include "mi_disp_file.h"
 #include "mi_disp_print.h"
+#include "mi_disp_lhbm.h"
 
 int mi_disp_open(struct inode *inode, struct file *file)
 {
@@ -274,9 +275,49 @@ err_free_rx:
 	if (ctl.rx_len && ctl.rx_ptr)
 		kfree(ctl.rx_ptr);
 err_free_tx:
-	if (ctl.tx_len && ctl.tx_ptr)
+	if (ctl.tx_len && ctl.tx_ptr) {
 		kfree(ctl.tx_ptr);
+		ctl.tx_ptr = NULL;
+	}
 exit:
+	mutex_unlock(&client->client_lock);
+	return ret;
+}
+
+static int mi_disp_ioctl_set_local_hbm(
+			struct disp_feature_client *client, void *data)
+{
+	struct disp_feature *df = client->df;
+	struct disp_local_hbm_req *req = data;
+	u32 disp_id = req->base.disp_id;
+	struct disp_display *dd_ptr = NULL;
+	u32 local_hbm_value;
+	int ret = 0;
+
+	ret = mutex_lock_interruptible(&client->client_lock);
+	if (ret)
+		return ret;
+
+	local_hbm_value = req->local_hbm_value;
+
+	if (is_support_disp_id(disp_id)) {
+		dd_ptr = &df->d_display[disp_id];
+		if (dd_ptr->intf_type == MI_INTF_DSI) {
+			DISP_INFO("%s display local_hbm_value = %s\n",
+				get_disp_id_name(disp_id), get_lhbm_value_name(local_hbm_value));
+			#ifdef CONFIG_MI_DISP_LHBM
+			ret = mi_disp_set_local_hbm(disp_id, local_hbm_value);
+			#endif
+		} else {
+			DISP_INFO("Unsupported display(%s intf)\n",
+				get_disp_intf_type_name(dd_ptr->intf_type));
+			ret = -EINVAL;
+		}
+	} else {
+		DISP_INFO("Unsupported display id\n");
+		ret = -EINVAL;
+	}
+
 	mutex_unlock(&client->client_lock);
 	return ret;
 }
@@ -813,6 +854,7 @@ static const struct disp_ioctl_desc disp_ioctls[] = {
 	DISP_IOCTL_DEF(MI_DISP_IOCTL_READ_DSI_CMD, mi_disp_ioctl_read_dsi_cmd),
 	DISP_IOCTL_DEF(MI_DISP_IOCTL_SET_BRIGHTNESS, mi_disp_ioctl_set_brightness),
 	DISP_IOCTL_DEF(MI_DISP_IOCTL_GET_BRIGHTNESS, mi_disp_ioctl_get_brightness),
+	DISP_IOCTL_DEF(MI_DISP_IOCTL_SET_LOCAL_HBM, mi_disp_ioctl_set_local_hbm),
 };
 
 #define DISP_IOCTL_COUNT	ARRAY_SIZE(disp_ioctls)

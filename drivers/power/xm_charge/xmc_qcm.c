@@ -521,7 +521,7 @@ static void qcm_update_charge_status(struct qcm_chip *chip)
 	power_supply_get_property(chip->usb_psy, POWER_SUPPLY_PROP_JEITA_CHG_INDEX, &val);
 	chip->jeita_chg_index = val.intval;
 
-	power_supply_get_property(chip->usb_psy, POWER_SUPPLY_PROP_INPUT_SUSPEND, &val);
+	power_supply_get_property(chip->usb_psy, POWER_SUPPLY_PROP_INPUT_SUSPEND_USB, &val);
 	chip->input_suspend = val.intval;
 
 	power_supply_get_property(chip->usb_psy, POWER_SUPPLY_PROP_TYPEC_BURN, &val);

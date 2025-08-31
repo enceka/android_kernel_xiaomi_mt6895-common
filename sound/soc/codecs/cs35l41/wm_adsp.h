@@ -325,5 +325,5 @@ int wm_adsp_read_ctl(struct wm_adsp *dsp, const char *name,  int type,
 		      unsigned int alg, void *buf, size_t len);
 
 extern int wm_adsp_handle_fw_event(struct wm_adsp *dsp);
-int wm_halo_apply_calibration(struct snd_soc_dapm_widget *w);
+int wm_halo_apply_calibration(struct wm_adsp *dsp);
 #endif

@@ -308,6 +308,7 @@ struct ln8000_platform_data {
     bool tdie_prot_disable;         /* disable die temperature protection */
     bool tdie_reg_disable;          /* disable die temperature regulation */
     bool revcurr_prot_disable;      /* disable reverse current protection */
+    bool reset_prevent_enable;   /* enable ic reset prevent workaround patch  */
 };
 
 struct ln8000_info {

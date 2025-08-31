@@ -25,7 +25,7 @@
 	cd-debounce-delay-ms = <0>;
 	cd-gpios = <&pio 11 GPIO_ACTIVE_LOW>;
 	vmmc-supply = <&mt6368_vmch_eint_high>;
-	vqmmc-supply = <&mt6368_vmc>;
+	//vqmmc-supply = <&mt6368_vmc>;
 	no-mmc;
 	no-sdio;
 	mediatek,mmc-qos;

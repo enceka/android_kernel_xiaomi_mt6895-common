@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2007-2010 Advanced Micro Devices, Inc.
- * Copyright (C) 2022 XiaoMi, Inc.
  * Author: Joerg Roedel <jroedel@suse.de>
  *         Leo Duran <leo.duran@amd.com>
  */
@@ -110,6 +109,7 @@
 #define PASID_MASK		0x0000ffff
 
 /* MMIO status bits */
+#define MMIO_STATUS_EVT_OVERFLOW_INT_MASK	(1 << 0)
 #define MMIO_STATUS_EVT_INT_MASK	(1 << 1)
 #define MMIO_STATUS_COM_WAIT_INT_MASK	(1 << 2)
 #define MMIO_STATUS_PPR_INT_MASK	(1 << 6)
@@ -247,8 +247,8 @@
 #define GA_ENTRY_SIZE		8
 #define GA_LOG_SIZE		(GA_ENTRY_SIZE * GA_LOG_ENTRIES)
 
-#define GA_TAG(x)		((u32)(x & 0xffffffffULL))
-#define GA_DEVID(x)		((u16)(((x) >> 32) & 0xffffULL))
+#define GA_TAG(x)		(u32)(x & 0xffffffffULL)
+#define GA_DEVID(x)		(u16)(((x) >> 32) & 0xffffULL)
 #define GA_REQ_TYPE(x)		(((x) >> 60) & 0xfULL)
 
 #define GA_GUEST_NR		0x1
@@ -272,7 +272,7 @@
 
 #define PM_LEVEL_SHIFT(x)	(12 + ((x) * 9))
 #define PM_LEVEL_SIZE(x)	(((x) < 6) ? \
-				  ((1ULL << PM_LEVEL_SHIFT((x))) - 1) : \
+				  ((1ULL << PM_LEVEL_SHIFT((x))) - 1): \
 				   (0xffffffffffffffffULL))
 #define PM_LEVEL_INDEX(x, a)	(((a) >> PM_LEVEL_SHIFT((x))) & 0x1ffULL)
 #define PM_LEVEL_ENC(x)		(((x) << 9) & 0xe00ULL)
@@ -407,7 +407,7 @@ extern bool amd_iommu_dump;
 	do {							\
 		if (amd_iommu_dump)				\
 			pr_info("AMD-Vi: " format, ## arg);	\
-	} while (0);
+	} while(0);
 
 /* global flag if IOMMUs cache non-present entries */
 extern bool amd_iommu_np_cache;

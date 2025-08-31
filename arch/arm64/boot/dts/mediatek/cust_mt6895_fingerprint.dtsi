@@ -16,6 +16,7 @@
 		netlink-event = <30>;
 		vfp-supply = <&mt6368_vfp>;
 		vibr-supply = <&mt6368_vibr>;
+                vufs18-supply = <&mt6363_vufs18>;
 		power-type = <1>;
 		status = "okay";
 	};
